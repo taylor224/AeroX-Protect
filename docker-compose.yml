@@ -1,0 +1,272 @@
+# AeroXProtect (axp) — 7-service stack. Reads .env (copy from .env.example).
+#   docker compose up --build
+# Exposed: frontend :3000, backend :10000, go2rtc :1984/:8554/:8555.
+# Internal only: mysql, redis, detector.
+
+name: axp
+
+services:
+  axp-mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DATABASE_DB:-axp}
+      MYSQL_USER: ${DATABASE_ID:-axp}
+      MYSQL_PASSWORD: ${DATABASE_PW:-axp}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-axproot}
+      TZ: UTC
+    volumes:
+      - axp-mysql-data:/var/lib/mysql
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-axproot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [axp-net]
+
+  axp-redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - axp-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [axp-net]
+
+  axp-go2rtc:
+    image: alexxit/go2rtc:1.9.4
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    ports:
+      - "1984:1984"      # API / web UI
+      - "8554:8554"      # RTSP
+      - "8555:8555/tcp"  # WebRTC
+      - "8555:8555/udp"
+    volumes:
+      - ./go2rtc/go2rtc.yaml:/config/go2rtc.yaml
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:1984/api"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [axp-net]
+
+  axp-backend:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      PROJECT_ENV: ${PROJECT_ENV:-production}
+      TZ: UTC
+      AXP_DB_INIT: "true"
+      DATABASE_URL: axp-mysql
+      DATABASE_ID: ${DATABASE_ID:-axp}
+      DATABASE_PW: ${DATABASE_PW:-axp}
+      DATABASE_DB: ${DATABASE_DB:-axp}
+      REDIS_URL: axp-redis
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-900}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-1209600}
+      SNOWFLAKE_INSTANCE: "1"
+      CREDENTIAL_ENC_KEY: ${CREDENTIAL_ENC_KEY:-}
+      GO2RTC_URL: http://axp-go2rtc:1984
+      GO2RTC_RTSP: rtsp://axp-go2rtc:8554
+      AXP_DISK_ROOT: /mnt/axp
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BOOTSTRAP_ADMIN_ID: ${BOOTSTRAP_ADMIN_ID:-admin}
+      BOOTSTRAP_ADMIN_PW: ${BOOTSTRAP_ADMIN_PW:-}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-관리자}
+    ports:
+      - "10000:10000"
+    volumes:
+      - axp-media:/media
+      - ./go2rtc:/go2rtc
+      - ./media/disk1:/mnt/axp/disk1
+      - ./media/disk2:/mnt/axp/disk2
+    depends_on:
+      axp-mysql:
+        condition: service_healthy
+      axp-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10000/api/v1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks: [axp-net]
+
+  axp-worker:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    command: ["celery", "-A", "server.task.celery", "worker", "-B", "-l", "info"]
+    environment:
+      PROJECT_ENV: ${PROJECT_ENV:-production}
+      TZ: UTC
+      AXP_DB_INIT: "false"
+      DATABASE_URL: axp-mysql
+      DATABASE_ID: ${DATABASE_ID:-axp}
+      DATABASE_PW: ${DATABASE_PW:-axp}
+      DATABASE_DB: ${DATABASE_DB:-axp}
+      REDIS_URL: axp-redis
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      SNOWFLAKE_INSTANCE: "2"
+      CREDENTIAL_ENC_KEY: ${CREDENTIAL_ENC_KEY:-}
+      AXP_DISK_ROOT: /mnt/axp
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      - axp-media:/media
+      - ./media/disk1:/mnt/axp/disk1
+      - ./media/disk2:/mnt/axp/disk2
+    depends_on:
+      axp-mysql:
+        condition: service_healthy
+      axp-redis:
+        condition: service_healthy
+      axp-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A server.task.celery inspect ping -t 10 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 45s
+    networks: [axp-net]
+
+  # Dedicated worker for the `subs` queue: long-lived per-camera event-subscription loops
+  # (ISAPI alertstream / ONVIF pull-point). These block for the camera's lifetime, so they run
+  # on a thread pool here instead of starving the main prefork worker's slots. WITHOUT this
+  # service nothing consumes `subs` and camera event subscriptions never open → no vendor
+  # events → no event recording. (-c = max concurrent subscriptions = max event-capable cameras.)
+  axp-subs:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    command: ["celery", "-A", "server.task.celery", "worker", "-Q", "subs",
+              "--pool=threads", "-c", "50", "-n", "subs@%h", "-l", "info"]
+    environment:
+      PROJECT_ENV: ${PROJECT_ENV:-production}
+      TZ: UTC
+      AXP_DB_INIT: "false"
+      DATABASE_URL: axp-mysql
+      DATABASE_ID: ${DATABASE_ID:-axp}
+      DATABASE_PW: ${DATABASE_PW:-axp}
+      DATABASE_DB: ${DATABASE_DB:-axp}
+      REDIS_URL: axp-redis
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      SNOWFLAKE_INSTANCE: "4"
+      CREDENTIAL_ENC_KEY: ${CREDENTIAL_ENC_KEY:-}
+      AXP_DISK_ROOT: /mnt/axp
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      axp-mysql:
+        condition: service_healthy
+      axp-redis:
+        condition: service_healthy
+      axp-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A server.task.celery inspect ping -d subs@$$(hostname) -t 10 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 45s
+    networks: [axp-net]
+
+  # Long-running segment recorder (NOT Celery) — per-camera ffmpeg supervisor (PLAN P2 §6.4)
+  axp-recorder:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "worker.recorder"]
+    environment:
+      PROJECT_ENV: ${PROJECT_ENV:-production}
+      TZ: UTC
+      DATABASE_URL: axp-mysql
+      DATABASE_ID: ${DATABASE_ID:-axp}
+      DATABASE_PW: ${DATABASE_PW:-axp}
+      DATABASE_DB: ${DATABASE_DB:-axp}
+      REDIS_URL: axp-redis
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      SNOWFLAKE_INSTANCE: "3"
+      CREDENTIAL_ENC_KEY: ${CREDENTIAL_ENC_KEY:-}
+      AXP_DISK_ROOT: /mnt/axp
+      GO2RTC_RTSP: rtsp://axp-go2rtc:8554
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      - ./media/disk1:/mnt/axp/disk1
+      - ./media/disk2:/mnt/axp/disk2
+    depends_on:
+      axp-mysql:
+        condition: service_healthy
+      axp-redis:
+        condition: service_healthy
+      axp-go2rtc:
+        condition: service_healthy
+    networks: [axp-net]
+
+  axp-detector:
+    build:
+      context: .
+      dockerfile: worker/detector/Dockerfile
+    restart: unless-stopped
+    environment:
+      GPU_ENABLED: ${GPU_ENABLED:-false}
+      DETECTOR_BIND: 0.0.0.0:8099
+    depends_on:
+      axp-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8099/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [axp-net]
+
+  axp-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_APP_API_URL: ${VITE_APP_API_URL:-/api/v1}
+        VITE_APP_NAME: ${VITE_APP_NAME:-axp}
+        VITE_APP_VERSION: ${VITE_APP_VERSION:-1}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - axp-backend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [axp-net]
+
+volumes:
+  axp-mysql-data:
+  axp-redis-data:
+  axp-media:
+
+networks:
+  axp-net:
+    driver: bridge

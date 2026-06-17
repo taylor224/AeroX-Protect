@@ -1,0 +1,10 @@
+{
+  "name": "AeroX Protect",
+  "short_name": "AeroX Protect",
+  "description": "Open-source NVR",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#171A20",
+  "theme_color": "#171A20",
+  "icons": []
+}

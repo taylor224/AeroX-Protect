@@ -1,0 +1,250 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- AeroXProtect (axp) — Phase 5 (automation + monitors + notifications)
+--
+-- Runs after 0004. All-new tables (no drops). Mirrors server/model/{rule,rule_execution,
+-- action_target,webhook_endpoint,monitor,pairing_code,notification_subscription,
+-- push_subscription,notification,api_token}.py. UTC DATETIME(3); Snowflake BIGINT UNSIGNED.
+-- Credentials/secrets are Fernet ciphertext (VARBINARY). Permission keys (rules/targets/
+-- monitors/notifications/api_tokens) were seeded in the P0 catalog (0000_init.sql).
+-- P3 event_outbox is consumed (pending→consumed) only — no P3 schema change.
+-- ─────────────────────────────────────────────────────────────────────────────
+USE `axp`;
+
+CREATE TABLE IF NOT EXISTS `rules` (
+  `id`                 BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `uuid`               CHAR(32)        NOT NULL,
+  `name`               VARCHAR(120)    NOT NULL,
+  `description`        VARCHAR(500)    NULL,
+  `enabled`            TINYINT(1)      NOT NULL DEFAULT 1,
+  `priority`           SMALLINT        NOT NULL DEFAULT 0,
+  `stop_on_match`      TINYINT(1)      NOT NULL DEFAULT 0,
+  `trigger_type`       VARCHAR(16)     NOT NULL,
+  `trigger`            JSON            NOT NULL,
+  `condition`          JSON            NOT NULL,
+  `actions`            JSON            NOT NULL,
+  `cooldown_s`         SMALLINT        NOT NULL DEFAULT 30,
+  `debounce_s`         SMALLINT        NOT NULL DEFAULT 0,
+  `dedup_scope`        VARCHAR(16)     NOT NULL DEFAULT 'camera',
+  `max_per_hour`       SMALLINT        NULL,
+  `last_triggered_ts`  DATETIME(3)     NULL,
+  `created_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`         DATETIME(3)     NULL,
+  `created_by_id`      BIGINT UNSIGNED NULL,
+  `last_updated_by_id` BIGINT UNSIGNED NULL,
+  UNIQUE KEY `uq_rules_uuid` (`uuid`),
+  KEY `idx_rules_enabled_pri` (`enabled`, `priority`),
+  KEY `idx_rules_trigger` (`trigger_type`, `enabled`),
+  KEY `idx_rules_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `rule_executions` (
+  `id`              BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `rule_id`         BIGINT UNSIGNED NOT NULL,
+  `trigger_type`    VARCHAR(16)     NOT NULL,
+  `event_id`        BIGINT UNSIGNED NULL,
+  `camera_id`       BIGINT UNSIGNED NULL,
+  `matched`         TINYINT(1)      NOT NULL,
+  `skip_reason`     VARCHAR(32)     NULL,
+  `idempotency_key` VARCHAR(120)    NULL,
+  `action_results`  JSON            NULL,
+  `status`          VARCHAR(16)     NOT NULL,
+  `started_ts`      DATETIME(3)     NULL,
+  `finished_ts`     DATETIME(3)     NULL,
+  `duration_ms`     INT             NULL,
+  `celery_task_id`  VARCHAR(64)     NULL,
+  `created_at`      DATETIME(3)     NOT NULL,
+  `deleted_at`      DATETIME(3)     NULL,
+  KEY `idx_re_rule_ts` (`rule_id`, `created_at`),
+  KEY `idx_re_cam_ts` (`camera_id`, `created_at`),
+  KEY `idx_re_event` (`event_id`),
+  KEY `idx_re_idem` (`idempotency_key`),
+  KEY `idx_re_status` (`status`, `created_at`),
+  KEY `idx_re_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `action_targets` (
+  `id`                 BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `uuid`               CHAR(32)        NOT NULL,
+  `type`               VARCHAR(16)     NOT NULL,
+  `name`               VARCHAR(120)    NOT NULL,
+  `vendor`             VARCHAR(40)     NULL,
+  `protocol`           VARCHAR(24)     NOT NULL,
+  `host`               VARCHAR(190)    NULL,
+  `port`               INT             NULL,
+  `config`             JSON            NOT NULL,
+  `username_enc`       VARBINARY(512)  NULL,
+  `password_enc`       VARBINARY(512)  NULL,
+  `cred_key_id`        VARCHAR(16)     NULL,
+  `camera_id`          BIGINT UNSIGNED NULL,
+  `enabled`            TINYINT(1)      NOT NULL DEFAULT 1,
+  `status`             VARCHAR(16)     NOT NULL DEFAULT 'unknown',
+  `last_checked_at`    DATETIME(3)     NULL,
+  `created_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`         DATETIME(3)     NULL,
+  `created_by_id`      BIGINT UNSIGNED NULL,
+  `last_updated_by_id` BIGINT UNSIGNED NULL,
+  UNIQUE KEY `uq_at_uuid` (`uuid`),
+  KEY `idx_at_type` (`type`, `enabled`),
+  KEY `idx_at_camera` (`camera_id`),
+  KEY `idx_at_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `webhook_endpoints` (
+  `id`                   BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `uuid`                 CHAR(32)        NOT NULL,
+  `name`                 VARCHAR(120)    NOT NULL,
+  `url`                  VARCHAR(1024)   NOT NULL,
+  `secret_enc`           VARBINARY(512)  NULL,
+  `cred_key_id`          VARCHAR(16)     NULL,
+  `headers`              JSON            NULL,
+  `timeout_ms`           INT             NOT NULL DEFAULT 5000,
+  `max_retries`          SMALLINT        NOT NULL DEFAULT 3,
+  `verify_tls`           TINYINT(1)      NOT NULL DEFAULT 1,
+  `purpose`              VARCHAR(16)     NOT NULL DEFAULT 'action',
+  `subscription_filter`  JSON            NULL,
+  `api_token_id`         BIGINT UNSIGNED NULL,
+  `enabled`              TINYINT(1)      NOT NULL DEFAULT 1,
+  `last_status`          SMALLINT        NULL,
+  `last_delivered_at`    DATETIME(3)     NULL,
+  `consecutive_failures` SMALLINT        NOT NULL DEFAULT 0,
+  `created_at`           DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`           DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`           DATETIME(3)     NULL,
+  `created_by_id`        BIGINT UNSIGNED NULL,
+  `last_updated_by_id`   BIGINT UNSIGNED NULL,
+  UNIQUE KEY `uq_we_uuid` (`uuid`),
+  KEY `idx_we_purpose` (`purpose`, `enabled`),
+  KEY `idx_we_token` (`api_token_id`),
+  KEY `idx_we_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `monitors` (
+  `id`                 BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `uuid`               CHAR(32)        NOT NULL,
+  `name`               VARCHAR(120)    NOT NULL,
+  `dashboard_id`       BIGINT UNSIGNED NOT NULL,
+  `rotation`           JSON            NULL,
+  `status`             VARCHAR(16)     NOT NULL DEFAULT 'unpaired',
+  `token_version`      INT             NOT NULL DEFAULT 0,
+  `paired_at`          DATETIME(3)     NULL,
+  `last_seen_at`       DATETIME(3)     NULL,
+  `last_ip`            VARCHAR(64)     NULL,
+  `user_agent`         VARCHAR(255)    NULL,
+  `device_label`       VARCHAR(120)    NULL,
+  `settings`           JSON            NULL,
+  `enabled`            TINYINT(1)      NOT NULL DEFAULT 1,
+  `created_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`         DATETIME(3)     NULL,
+  `created_by_id`      BIGINT UNSIGNED NULL,
+  `last_updated_by_id` BIGINT UNSIGNED NULL,
+  UNIQUE KEY `uq_monitors_uuid` (`uuid`),
+  KEY `idx_monitors_dashboard` (`dashboard_id`),
+  KEY `idx_monitors_status` (`status`),
+  KEY `idx_monitors_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `pairing_codes` (
+  `id`            BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `monitor_id`    BIGINT UNSIGNED NOT NULL,
+  `code_hash`     CHAR(64)        NOT NULL,
+  `code_last4`    CHAR(4)         NULL,
+  `expires_at`    DATETIME(3)     NOT NULL,
+  `attempts`      SMALLINT        NOT NULL DEFAULT 0,
+  `max_attempts`  SMALLINT        NOT NULL DEFAULT 5,
+  `consumed_at`   DATETIME(3)     NULL,
+  `created_ip`    VARCHAR(64)     NULL,
+  `created_by_id` BIGINT UNSIGNED NULL,
+  `created_at`    DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY `idx_pc_monitor` (`monitor_id`),
+  KEY `idx_pc_code` (`code_hash`),
+  KEY `idx_pc_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `notification_subscriptions` (
+  `id`                  BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `user_id`             BIGINT UNSIGNED NOT NULL,
+  `channel`             VARCHAR(16)     NOT NULL,
+  `event_types`         JSON            NULL,
+  `camera_ids`          JSON            NULL,
+  `object_classes`      JSON            NULL,
+  `min_priority`        VARCHAR(8)      NOT NULL DEFAULT 'normal',
+  `muted`               TINYINT(1)      NOT NULL DEFAULT 0,
+  `muted_until`         DATETIME(3)     NULL,
+  `batch_window_s`      SMALLINT        NOT NULL DEFAULT 0,
+  `quiet_hours`         JSON            NULL,
+  `webhook_endpoint_id` BIGINT UNSIGNED NULL,
+  `enabled`             TINYINT(1)      NOT NULL DEFAULT 1,
+  `created_at`          DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`          DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`          DATETIME(3)     NULL,
+  KEY `idx_ns_user` (`user_id`),
+  KEY `idx_ns_channel` (`channel`, `enabled`),
+  KEY `idx_ns_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `push_subscriptions` (
+  `id`              BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `user_id`         BIGINT UNSIGNED NOT NULL,
+  `endpoint`        VARCHAR(1024)   NOT NULL,
+  `endpoint_hash`   CHAR(64)        NOT NULL,
+  `p256dh`          VARCHAR(255)    NOT NULL,
+  `auth`            VARCHAR(64)     NOT NULL,
+  `ua`              VARCHAR(255)    NULL,
+  `expiration_ts`   DATETIME(3)     NULL,
+  `enabled`         TINYINT(1)      NOT NULL DEFAULT 1,
+  `last_success_at` DATETIME(3)     NULL,
+  `created_at`      DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`      DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`      DATETIME(3)     NULL,
+  UNIQUE KEY `uq_ps_endpoint_hash` (`endpoint_hash`),
+  KEY `idx_ps_user` (`user_id`),
+  KEY `idx_ps_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `notifications` (
+  `id`            BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `user_id`       BIGINT UNSIGNED NOT NULL,
+  `event_id`      BIGINT UNSIGNED NULL,
+  `rule_id`       BIGINT UNSIGNED NULL,
+  `camera_id`     BIGINT UNSIGNED NULL,
+  `type`          VARCHAR(32)     NOT NULL,
+  `priority`      VARCHAR(8)      NOT NULL DEFAULT 'normal',
+  `title`         VARCHAR(200)    NOT NULL,
+  `body`          VARCHAR(500)    NULL,
+  `snapshot_path` VARCHAR(512)    NULL,
+  `deeplink`      VARCHAR(255)    NULL,
+  `channels_sent` JSON            NULL,
+  `read_at`       DATETIME(3)     NULL,
+  `created_at`    DATETIME(3)     NOT NULL,
+  `deleted_at`    DATETIME(3)     NULL,
+  KEY `idx_n_user_ts` (`user_id`, `created_at`),
+  KEY `idx_n_unread` (`user_id`, `read_at`),
+  KEY `idx_n_event` (`event_id`),
+  KEY `idx_n_deleted` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `api_tokens` (
+  `id`                 BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  `uuid`               CHAR(32)        NOT NULL,
+  `name`               VARCHAR(120)    NOT NULL,
+  `token_prefix`       CHAR(8)         NOT NULL,
+  `token_hash`         CHAR(64)        NOT NULL,
+  `scopes`             JSON            NOT NULL,
+  `camera_ids`         JSON            NULL,
+  `expires_at`         DATETIME(3)     NULL,
+  `last_used_at`       DATETIME(3)     NULL,
+  `last_ip`            VARCHAR(64)     NULL,
+  `revoked_at`         DATETIME(3)     NULL,
+  `rate_limit_per_min` SMALLINT        NOT NULL DEFAULT 120,
+  `created_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `created_by_id`      BIGINT UNSIGNED NULL,
+  `last_updated_by_id` BIGINT UNSIGNED NULL,
+  UNIQUE KEY `uq_api_uuid` (`uuid`),
+  UNIQUE KEY `uq_api_hash` (`token_hash`),
+  KEY `idx_api_prefix` (`token_prefix`),
+  KEY `idx_api_revoked` (`revoked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,0 +1,8 @@
+# Real-inference profile (heavy — adds ~multi-GB). Install on top of requirements.txt to
+# enable the YOLO backend + frame capture. GPU image uses a CUDA torch base instead.
+#   pip install -r worker/detector/requirements-inference.txt
+ultralytics==8.3.40
+supervision==0.25.1
+opencv-python-headless==4.10.0.84
+numpy==2.1.3
+torch==2.5.1            # CPU wheel; for GPU use the CUDA build (see Dockerfile.gpu)

@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>AeroXProtect — 자체 호스팅 NVR 플랫폼</title>
+<style>
+/* ============================================================== AeroXProtect deck
+   Aesthetic: security operations console — deep black, signal-green, monospace HUD,
+   camera-viewfinder reticles, scanline + grain. Self-contained, offline, no CDNs. */
+:root{
+  --bg:#07090b; --bg2:#0b0e12; --panel:#11151a; --panel2:#171c23; --panel3:#1d242c;
+  --line:#222a33; --line-soft:#19202700; --hair:#2a333d;
+  --ink:#eef4f8; --muted:#8a97a4; --faint:#586571;
+  --signal:#39e6a3; --signal-2:#23c489; --signal-glow:rgba(57,230,163,.16);
+  --cyan:#46c8ec; --amber:#f5b13c; --red:#ff5d5d; --violet:#9aa6ff;
+  --mono:"SF Mono","Menlo","Monaco","Cascadia Code","Roboto Mono",ui-monospace,monospace;
+  --sans:"Avenir Next","Apple SD Gothic Neo","Helvetica Neue","Segoe UI",system-ui,sans-serif;
+  --pad: clamp(28px, 5vw, 84px);
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--sans);
+  overflow:hidden; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  cursor:default;
+}
+/* ---- atmospheric background layers ---- */
+.bg{position:fixed; inset:0; z-index:0; pointer-events:none}
+.bg-glow{position:fixed; inset:-20%; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(60% 50% at 78% 18%, rgba(57,230,163,.10), transparent 60%),
+    radial-gradient(50% 50% at 10% 90%, rgba(70,200,236,.07), transparent 60%),
+    radial-gradient(40% 40% at 50% 50%, rgba(20,28,36,.6), transparent 70%);
+  filter:saturate(1.05);
+}
+.bg-grid{position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.5;
+  background-image:
+    linear-gradient(to right, rgba(120,150,170,.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(120,150,170,.045) 1px, transparent 1px);
+  background-size:56px 56px; mask-image:radial-gradient(120% 100% at 50% 30%, #000 55%, transparent 100%);
+}
+.bg-scan{position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.35; mix-blend-mode:overlay;
+  background:repeating-linear-gradient(to bottom, rgba(255,255,255,.025) 0 1px, transparent 1px 3px);}
+.bg-grain{position:fixed; inset:0; z-index:1; pointer-events:none; opacity:.05; mix-blend-mode:overlay}
+.bg-vig{position:fixed; inset:0; z-index:1; pointer-events:none;
+  box-shadow:inset 0 0 240px 40px rgba(0,0,0,.75);}
+.sweep{position:fixed; left:0; right:0; height:140px; z-index:1; pointer-events:none; opacity:.5;
+  background:linear-gradient(to bottom, transparent, rgba(57,230,163,.05), transparent);
+  animation:sweep 7.5s linear infinite;}
+@keyframes sweep{from{transform:translateY(-160px)} to{transform:translateY(100vh)}}
+
+/* ---- persistent HUD chrome ---- */
+.hud{position:fixed; z-index:30; pointer-events:none; font-family:var(--mono);
+  font-size:11px; letter-spacing:.16em; color:var(--faint); text-transform:uppercase}
+.hud.tl{top:22px; left:var(--pad); display:flex; align-items:center; gap:12px}
+.hud.tr{top:22px; right:var(--pad); display:flex; align-items:center; gap:18px}
+.hud.bl{bottom:22px; left:var(--pad)}
+.hud.br{bottom:22px; right:var(--pad)}
+.brand{display:flex; align-items:center; gap:10px; color:var(--ink); letter-spacing:.2em}
+.brand b{font-weight:600}
+.logo{width:18px; height:18px; position:relative; flex:0 0 auto}
+.logo::before,.logo::after{content:""; position:absolute; inset:0; border:1.5px solid var(--signal)}
+.logo::before{clip-path:polygon(0 0,38% 0,38% 12%,12% 12%,12% 38%,0 38%); }
+.logo::after{transform:rotate(180deg); clip-path:polygon(0 0,38% 0,38% 12%,12% 12%,12% 38%,0 38%);}
+.logo i{position:absolute; inset:35%; background:var(--signal); border-radius:50%;
+  box-shadow:0 0 10px var(--signal); animation:blink 2.4s ease-in-out infinite}
+.rec{display:inline-flex; align-items:center; gap:7px; color:var(--red)}
+.rec::before{content:""; width:8px; height:8px; border-radius:50%; background:var(--red);
+  box-shadow:0 0 10px var(--red); animation:blink 1.3s steps(1) infinite}
+@keyframes blink{0%,55%{opacity:1} 56%,100%{opacity:.25}}
+.tc{color:var(--muted)}
+.counter b{color:var(--signal); font-weight:600}
+
+.progress{position:fixed; left:0; bottom:0; height:2px; width:100%; z-index:31; background:rgba(255,255,255,.05)}
+.progress i{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--signal-2),var(--signal));
+  box-shadow:0 0 12px var(--signal-glow); transition:width .5s cubic-bezier(.7,0,.2,1)}
+
+/* corner reticles on the active slide frame */
+.frame{position:fixed; inset:54px var(--pad); z-index:20; pointer-events:none}
+.frame span{position:absolute; width:24px; height:24px; border:1.5px solid rgba(57,230,163,.42)}
+.frame span:nth-child(1){top:0; left:0; border-right:0; border-bottom:0}
+.frame span:nth-child(2){top:0; right:0; border-left:0; border-bottom:0}
+.frame span:nth-child(3){bottom:0; left:0; border-right:0; border-top:0}
+.frame span:nth-child(4){bottom:0; right:0; border-left:0; border-top:0}
+
+/* ---- deck / slides ---- */
+.deck{position:fixed; inset:0; z-index:10}
+.slide{position:absolute; inset:0; padding:84px var(--pad) 76px; display:flex; flex-direction:column;
+  justify-content:center; opacity:0; visibility:hidden; transform:translateY(14px) scale(.99);
+  transition:opacity .55s ease, transform .65s cubic-bezier(.2,.7,.2,1), visibility 0s .6s;}
+.slide.active{opacity:1; visibility:visible; transform:none; transition:opacity .6s ease, transform .8s cubic-bezier(.2,.7,.2,1)}
+.slide.prev{transform:translateY(-14px) scale(.99)}
+
+/* staggered reveal */
+[data-r]{opacity:0; transform:translateY(16px); transition:opacity .6s ease, transform .7s cubic-bezier(.2,.7,.2,1)}
+.slide.active [data-r]{opacity:1; transform:none; transition-delay:calc(var(--i,0)*80ms + .12s)}
+
+/* ---- typography ---- */
+.kicker{font-family:var(--mono); font-size:12px; letter-spacing:.34em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:12px}
+.kicker::before{content:""; width:26px; height:1px; background:var(--signal); box-shadow:0 0 8px var(--signal-glow)}
+.num{font-family:var(--mono); font-size:13px; color:var(--faint); letter-spacing:.2em}
+h1{font-size:clamp(46px,8.2vw,128px); line-height:.92; font-weight:600; letter-spacing:-.02em}
+h2{font-size:clamp(30px,4.6vw,60px); line-height:1.02; font-weight:600; letter-spacing:-.015em}
+.lead{font-size:clamp(16px,1.5vw,21px); line-height:1.55; color:var(--muted); max-width:62ch; font-weight:300}
+.mono{font-family:var(--mono)}
+.sg{color:var(--signal)} .am{color:var(--amber)} .cy{color:var(--cyan)} .rd{color:var(--red)}
+
+.slide-head{display:flex; align-items:baseline; gap:22px; margin-bottom:30px}
+.slide-head .num{position:relative; top:-2px}
+
+/* ---- generic components ---- */
+.pill{display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--muted); border:1px solid var(--line);
+  padding:6px 11px; border-radius:2px; background:rgba(255,255,255,.015)}
+.pill .dot{width:6px; height:6px; border-radius:50%; background:var(--signal); box-shadow:0 0 8px var(--signal)}
+.pills{display:flex; flex-wrap:wrap; gap:9px}
+
+.grid{display:grid; gap:18px}
+.card{border:1px solid var(--line); background:linear-gradient(180deg,var(--panel),rgba(17,21,26,.6));
+  padding:22px 22px 20px; border-radius:4px; position:relative; overflow:hidden}
+.card::after{content:""; position:absolute; left:0; top:0; width:2px; height:0; background:var(--signal);
+  box-shadow:0 0 12px var(--signal-glow); transition:height .5s ease}
+.slide.active .card::after{height:42px; transition-delay:.5s}
+.card .ic{font-family:var(--mono); font-size:11px; letter-spacing:.18em; color:var(--signal); text-transform:uppercase}
+.card h3{font-size:19px; font-weight:600; margin:12px 0 8px; letter-spacing:-.01em}
+.card p{font-size:13.5px; line-height:1.55; color:var(--muted); font-weight:300}
+
+.stat{display:flex; flex-direction:column; gap:4px}
+.stat b{font-family:var(--mono); font-size:clamp(30px,3.6vw,46px); font-weight:600; color:var(--ink); letter-spacing:-.01em; line-height:1}
+.stat b em{color:var(--signal); font-style:normal}
+.stat span{font-size:12px; color:var(--faint); letter-spacing:.05em; text-transform:uppercase; font-family:var(--mono)}
+
+/* ============================== slide-specific ============================== */
+/* cover */
+#s0{justify-content:center}
+.cover-wrap{position:relative}
+.cover-reticle{position:absolute; right:-2%; top:50%; transform:translateY(-50%); width:min(38vw,520px); aspect-ratio:1;
+  pointer-events:none; opacity:.9}
+.cover-reticle .ring{position:absolute; inset:0; border:1px solid rgba(57,230,163,.18); border-radius:50%}
+.cover-reticle .ring:nth-child(2){inset:14%; border-color:rgba(57,230,163,.12); border-style:dashed}
+.cover-reticle .ring:nth-child(3){inset:30%; border-color:rgba(70,200,236,.16)}
+.cover-reticle .ring:nth-child(4){inset:44%; border-color:rgba(57,230,163,.5);
+  animation:spin 22s linear infinite; border-top-color:transparent; border-left-color:transparent}
+.cover-reticle .core{position:absolute; inset:46%; background:var(--signal); border-radius:50%; box-shadow:0 0 28px var(--signal)}
+.cover-reticle .cross{position:absolute; inset:0}
+.cover-reticle .cross::before,.cover-reticle .cross::after{content:""; position:absolute; background:rgba(57,230,163,.22)}
+.cover-reticle .cross::before{left:50%; top:6%; bottom:6%; width:1px; transform:translateX(-.5px)}
+.cover-reticle .cross::after{top:50%; left:6%; right:6%; height:1px; transform:translateY(-.5px)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.cover h1{margin:18px 0 0}
+.cover h1 small{display:block; font-size:.26em; letter-spacing:.02em; color:var(--muted); font-weight:300; margin-top:.5em; line-height:1.4; max-width:18ch}
+.cover .tagline{font-family:var(--mono); color:var(--signal); letter-spacing:.18em; font-size:13px; text-transform:uppercase}
+.cover .meta{display:flex; gap:26px; margin-top:42px; flex-wrap:wrap}
+
+/* two-column feature slide */
+.two{display:grid; grid-template-columns:1.05fr 1fr; gap:clamp(28px,4vw,72px); align-items:center}
+.feat-list{display:flex; flex-direction:column; gap:14px; margin-top:24px}
+.feat{display:flex; gap:16px; align-items:flex-start}
+.feat .k{font-family:var(--mono); color:var(--signal); font-size:12px; letter-spacing:.1em; padding-top:3px; min-width:30px}
+.feat .t b{display:block; font-size:16px; font-weight:600; letter-spacing:-.01em}
+.feat .t span{font-size:13.5px; color:var(--muted); line-height:1.5; font-weight:300}
+
+/* ===== MOCKUP: device chrome ===== */
+.shot{border:1px solid var(--hair); border-radius:8px; background:linear-gradient(180deg,#0d1115,#0a0d10);
+  overflow:hidden; box-shadow:0 40px 80px -30px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.02) inset;
+  position:relative}
+.shot .bar{display:flex; align-items:center; gap:8px; padding:11px 14px; border-bottom:1px solid var(--line);
+  background:rgba(255,255,255,.015)}
+.shot .bar .ttl{font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-left:6px}
+.shot .bar .grow{flex:1}
+.shot .bar .chip{font-family:var(--mono); font-size:10px; color:var(--faint); border:1px solid var(--line); padding:3px 8px; border-radius:3px; letter-spacing:.1em}
+.dot3{display:flex; gap:6px}
+.dot3 i{width:9px; height:9px; border-radius:50%; background:#2a323b}
+.dot3 i.g{background:var(--signal); box-shadow:0 0 7px var(--signal)}
+
+/* live wall */
+.wall{display:grid; grid-template-columns:repeat(4,1fr); grid-auto-rows:1fr; gap:6px; padding:10px}
+.tile{position:relative; aspect-ratio:16/10; border-radius:4px; overflow:hidden; border:1px solid #1b222a;
+  background:#0c0f13}
+.tile .scene{position:absolute; inset:0}
+.tile .scene::after{content:""; position:absolute; inset:0; opacity:.5; mix-blend-mode:overlay;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 3px)}
+.sc1{background:linear-gradient(160deg,#16323a,#0c1a22 60%,#0a1014)}
+.sc2{background:linear-gradient(150deg,#2a2233,#161019 55%,#0d0a10)}
+.sc3{background:linear-gradient(170deg,#243018,#12190c 60%,#0c0f08)}
+.sc4{background:linear-gradient(140deg,#102a36,#0a181f 60%,#080f13)}
+.sc5{background:linear-gradient(160deg,#332a1c,#1a1510 60%,#100c08)}
+.sc6{background:linear-gradient(150deg,#1c2630,#10171e 60%,#0a0e12)}
+.tile .top{position:absolute; top:0; left:0; right:0; display:flex; align-items:center; gap:6px;
+  padding:6px 8px; font-family:var(--mono); font-size:9px; letter-spacing:.08em; color:#cdd6de;
+  background:linear-gradient(180deg,rgba(0,0,0,.55),transparent)}
+.tile .top .nm{text-shadow:0 1px 2px #000}
+.tile .top .grow{flex:1}
+.tile .recdot{width:6px; height:6px; border-radius:50%; background:var(--red); box-shadow:0 0 6px var(--red); animation:blink 1.4s steps(1) infinite}
+.tile .live{color:var(--signal)}
+.tile .bot{position:absolute; bottom:0; left:0; right:0; padding:5px 8px; font-family:var(--mono);
+  font-size:9px; color:#9fb0bb; display:flex; gap:8px; background:linear-gradient(0deg,rgba(0,0,0,.5),transparent)}
+.tile.spot{box-shadow:0 0 0 2px var(--signal), 0 0 24px var(--signal-glow); z-index:2}
+.tile.off .scene{filter:grayscale(1) brightness(.4)}
+.tile.off .offlbl{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-family:var(--mono); font-size:10px; letter-spacing:.2em; color:#6b7782}
+.bbox{position:absolute; border:1.5px solid var(--signal); border-radius:2px; box-shadow:0 0 12px var(--signal-glow)}
+.bbox span{position:absolute; top:-15px; left:-1px; font-family:var(--mono); font-size:8px; letter-spacing:.05em;
+  background:var(--signal); color:#04150e; padding:1px 4px; border-radius:2px; white-space:nowrap; font-weight:600}
+.bbox.am{border-color:var(--amber); box-shadow:0 0 12px rgba(245,177,60,.2)}
+.bbox.am span{background:var(--amber); color:#1c1303}
+
+/* event timeline mockup */
+.tl-shot .body{padding:0}
+.tl-prev{position:relative; aspect-ratio:21/7; border-bottom:1px solid var(--line); overflow:hidden}
+.tl-prev .scene{position:absolute; inset:0}
+.tl-hud{position:absolute; top:8px; left:10px; right:10px; display:flex; gap:8px; font-family:var(--mono);
+  font-size:9px; color:#cdd6de; letter-spacing:.08em}
+.timeline{padding:14px 14px 10px}
+.tl-times{display:flex; justify-content:space-between; font-family:var(--mono); font-size:9px; color:var(--faint); letter-spacing:.06em; margin-bottom:6px}
+.track{position:relative; height:34px; border:1px solid var(--line); border-radius:3px; background:#0b0e12; overflow:hidden}
+.track .cov{position:absolute; top:8px; height:7px; border-radius:2px; background:linear-gradient(90deg,var(--signal-2),var(--signal)); opacity:.8}
+.track .mk{position:absolute; bottom:5px; width:2px; height:13px; border-radius:2px}
+.track .mk::after{content:""; position:absolute; top:-4px; left:50%; transform:translateX(-50%); width:6px; height:6px; border-radius:50%}
+.track .mk.mo{background:var(--cyan)} .track .mk.mo::after{background:var(--cyan); box-shadow:0 0 6px var(--cyan)}
+.track .mk.in{background:var(--amber)} .track .mk.in::after{background:var(--amber); box-shadow:0 0 6px var(--amber)}
+.track .play{position:absolute; top:0; bottom:0; width:2px; background:var(--ink); box-shadow:0 0 10px rgba(255,255,255,.5)}
+.track .play::before{content:""; position:absolute; top:-1px; left:-4px; border:5px solid transparent; border-top-color:var(--ink)}
+.evlist{margin-top:2px}
+.evrow{display:grid; grid-template-columns:88px 1fr 56px 70px; gap:10px; align-items:center; padding:9px 14px;
+  border-top:1px solid var(--line-soft); border-top-color:#141a20; font-family:var(--mono); font-size:11px}
+.evrow:first-child{border-top:0}
+.evrow.sel{background:rgba(57,230,163,.05)}
+.evrow .tm{color:var(--muted)}
+.evrow .ty{display:flex; align-items:center; gap:8px; color:var(--ink); letter-spacing:.02em}
+.evrow .ty i{width:7px; height:7px; border-radius:50%}
+.evrow .sc{color:var(--faint); text-align:right}
+.badge{font-size:9px; padding:3px 7px; border-radius:3px; letter-spacing:.1em; text-transform:uppercase; text-align:center; justify-self:end}
+.badge.rec{background:rgba(57,230,163,.12); color:var(--signal); border:1px solid rgba(57,230,163,.3)}
+.badge.notif{background:rgba(70,200,236,.1); color:var(--cyan); border:1px solid rgba(70,200,236,.25)}
+
+/* AI detect mockup */
+.detect{display:grid; grid-template-columns:1.6fr 1fr; gap:0}
+.detect .view{position:relative; aspect-ratio:16/11; overflow:hidden; border-right:1px solid var(--line)}
+.detect .panel{padding:16px}
+.detect .panel .lbl{font-family:var(--mono); font-size:10px; letter-spacing:.18em; color:var(--faint); text-transform:uppercase; margin:0 0 10px}
+.cls{display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid #141a20; font-family:var(--mono); font-size:12px}
+.cls:first-of-type{border-top:0}
+.cls .bar{flex:1; height:5px; border-radius:3px; background:#171d24; overflow:hidden}
+.cls .bar i{display:block; height:100%; background:linear-gradient(90deg,var(--signal-2),var(--signal))}
+.cls .n{color:var(--muted); min-width:64px}
+.cls .v{color:var(--signal); min-width:30px; text-align:right}
+.zone{position:absolute; border:1.5px dashed rgba(70,200,236,.5); background:rgba(70,200,236,.06); border-radius:3px}
+.zone span{position:absolute; top:4px; left:6px; font-family:var(--mono); font-size:8px; color:var(--cyan); letter-spacing:.1em}
+
+/* architecture */
+.arch{display:grid; grid-template-columns:repeat(3,1fr); gap:clamp(20px,3vw,48px); align-items:stretch; margin-top:8px}
+.acol{display:flex; flex-direction:column; gap:12px; position:relative}
+.acol .ch{font-family:var(--mono); font-size:11px; letter-spacing:.2em; color:var(--faint); text-transform:uppercase; margin-bottom:4px}
+.node{border:1px solid var(--line); border-radius:5px; padding:13px 15px; background:linear-gradient(180deg,var(--panel),rgba(17,21,26,.5)); position:relative}
+.node b{display:block; font-size:14px; font-weight:600; letter-spacing:-.01em}
+.node b .tag{font-family:var(--mono); font-size:9px; color:var(--signal); letter-spacing:.12em; margin-left:8px; vertical-align:middle}
+.node span{font-size:12px; color:var(--muted); font-weight:300; line-height:1.45; display:block; margin-top:3px}
+.node.hub{border-color:rgba(57,230,163,.4); box-shadow:0 0 0 1px rgba(57,230,163,.12), 0 0 30px var(--signal-glow)}
+.acol::after{content:""; position:absolute; right:calc(-1*clamp(20px,3vw,48px)/2 - 1px); top:18%; bottom:18%; width:1px;
+  background:repeating-linear-gradient(to bottom,var(--hair) 0 5px,transparent 5px 11px); opacity:.7}
+.acol:last-child::after{display:none}
+.flowdot{position:absolute; right:calc(-1*clamp(20px,3vw,48px)/2 - 4px); top:50%; width:7px; height:7px; border-radius:50%;
+  background:var(--signal); box-shadow:0 0 10px var(--signal); animation:flow 3.2s ease-in-out infinite}
+@keyframes flow{0%,100%{opacity:.3; transform:translateY(-50%) scale(.7)} 50%{opacity:1; transform:translateY(-50%) scale(1)}}
+
+/* advantages */
+.adv{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+.adv .card h3{font-size:17px}
+.adv .big{font-family:var(--mono); font-size:30px; color:var(--signal); font-weight:600; line-height:1}
+
+/* tech */
+.tech{display:grid; grid-template-columns:repeat(2,1fr); gap:14px 40px; margin-top:8px}
+.trow{display:flex; align-items:baseline; gap:16px; padding:13px 0; border-top:1px solid #161c22}
+.trow .l{font-family:var(--mono); font-size:11px; letter-spacing:.16em; color:var(--signal); text-transform:uppercase; min-width:120px}
+.trow .v{font-size:14px; color:var(--ink); font-weight:300}
+.trow .v b{font-weight:600}
+
+/* closing */
+#sEnd{justify-content:center; text-align:left}
+.end-stats{display:flex; gap:clamp(30px,5vw,80px); margin-top:46px; flex-wrap:wrap}
+
+/* hint + dotnav */
+.dotnav{position:fixed; right:var(--pad); top:50%; transform:translateY(-50%); z-index:30; display:flex; flex-direction:column; gap:10px}
+.dotnav b{width:7px; height:7px; border-radius:50%; border:1px solid #39434d; cursor:pointer; transition:.25s; pointer-events:auto}
+.dotnav b.on{background:var(--signal); border-color:var(--signal); box-shadow:0 0 10px var(--signal-glow)}
+.hint{position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:30; font-family:var(--mono);
+  font-size:10px; letter-spacing:.16em; color:var(--faint); text-transform:uppercase; pointer-events:none;
+  transition:opacity .5s; display:flex; gap:10px; align-items:center}
+.hint kbd{border:1px solid var(--line); border-radius:3px; padding:2px 6px; color:var(--muted); background:rgba(255,255,255,.02)}
+@media (max-width:760px){
+  .two,.detect{grid-template-columns:1fr} .arch,.adv,.tech{grid-template-columns:1fr}
+  .wall{grid-template-columns:repeat(2,1fr)} .acol::after{display:none}
+  .cover-reticle{display:none} .dotnav{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+/* ---- print / PDF export: one slide per landscape page, dark bg preserved ---- */
+@media print{
+  @page{ size:1600px 900px; margin:0 }
+  html,body{height:auto; overflow:visible; background:var(--bg);
+    -webkit-print-color-adjust:exact; print-color-adjust:exact}
+  .hud,.frame,.dotnav,.hint,.progress,.sweep{display:none!important}
+  .bg-glow,.bg-grid,.bg-scan,.bg-vig,.bg-grain{display:none!important}
+  .deck{position:static}
+  .slide{position:relative; inset:auto; width:1600px; height:900px; opacity:1!important;
+    visibility:visible!important; transform:none!important; page-break-after:always; break-after:page;
+    background:radial-gradient(60% 50% at 78% 18%, rgba(57,230,163,.10), transparent 60%), var(--bg);
+    -webkit-print-color-adjust:exact; print-color-adjust:exact}
+  .slide:last-child{page-break-after:auto}
+  [data-r]{opacity:1!important; transform:none!important; transition:none!important}
+  .card::after{height:42px!important}
+  *{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+<div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-scan"></div><div class="bg-vig"></div>
+<div class="sweep"></div>
+<svg class="bg-grain" xmlns="http://www.w3.org/2000/svg"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2"/></filter><rect width="100%" height="100%" filter="url(#n)"/></svg>
+
+<!-- HUD -->
+<div class="hud tl"><span class="brand"><span class="logo"><i></i></span><b>AERO<span class="sg">X</span>PROTECT</b></span></div>
+<div class="hud tr"><span class="rec">REC</span><span class="tc" id="tc">--:--:--</span><span class="counter">[<b id="cur">01</b> / <span id="tot">13</span>]</span></div>
+<div class="hud bl" id="secLabel">OVERVIEW</div>
+<div class="hud br">CH 01 · LIVE</div>
+<div class="frame"><span></span><span></span><span></span><span></span></div>
+<div class="dotnav" id="dots"></div>
+<div class="hint"><kbd>←</kbd><kbd>→</kbd> 이동 · <kbd>F</kbd> 전체화면</div>
+<div class="progress"><i id="prog"></i></div>
+
+<div class="deck" id="deck">
+
+<!-- 0 · COVER -->
+<section class="slide active" id="s0" data-label="STANDBY">
+  <div class="cover-wrap">
+    <div class="cover-reticle" aria-hidden="true">
+      <div class="ring"></div><div class="ring"></div><div class="ring"></div><div class="ring"></div>
+      <div class="cross"></div><div class="core"></div>
+    </div>
+    <div class="cover">
+      <div class="tagline" data-r style="--i:0">자체 호스팅 · 영상 인텔리전스 플랫폼</div>
+      <h1 data-r style="--i:1">AeroX<span class="sg">Protect</span>
+        <small>카메라 연결부터 녹화 · AI 분석 · 자동화 · 원격 접속까지<br>하나의 플랫폼에서.</small></h1>
+      <div class="meta">
+        <div class="stat" data-r style="--i:2"><b><em>10</em></b><span>기능 단계 (P0–P10)</span></div>
+        <div class="stat" data-r style="--i:3"><b><em>450+</em></b><span>자동화 테스트</span></div>
+        <div class="stat" data-r style="--i:4"><b>go2rtc<span class="sg">·</span>YOLO</b><span>미디어 + AI 코어</span></div>
+        <div class="stat" data-r style="--i:5"><b>WebRTC<span class="sg">·</span>MSE</b><span>저지연 라이브</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 1 · OVERVIEW -->
+<section class="slide" id="s1" data-label="OVERVIEW">
+  <div class="slide-head"><span class="num" data-r style="--i:0">01 / 개요</span></div>
+  <h2 data-r style="--i:1">로컬에서<br><span class="sg">모든 AI 영상 보안</span>을 운영합니다.</h2>
+  <p class="lead" data-r style="--i:2" style="margin-top:22px">
+    AeroXProtect는 클라우드에 의존하지 않는 자체 호스팅 NVR입니다. 멀티벤더 IP 카메라를 연결해
+    실시간 모니터링, 무중단 녹화, AI 기반 이벤트 분석, 규칙 자동화, 그리고 안전한 원격 접속까지
+    한 시스템에서 처리합니다. 영상은 내 인프라 안에 머뭅니다.</p>
+  <div class="grid" style="grid-template-columns:repeat(4,1fr); margin-top:40px">
+    <div class="card" data-r style="--i:3"><div class="ic">CONNECT</div><h3>멀티벤더 연결</h3><p>ONVIF · Hikvision(ISAPI) · Hanwha(SUNAPI) 자동 탐색과 표준 RTSP 연결.</p></div>
+    <div class="card" data-r style="--i:4"><div class="ic">RECORD</div><h3>안정적 녹화</h3><p>연속 세그먼트 레코더와 보존정책 기반 자동 회수, 정확한 타임라인 재생.</p></div>
+    <div class="card" data-r style="--i:5"><div class="ic">ANALYZE</div><h3>AI 이벤트</h3><p>객체 탐지 · LPR · 얼굴 인식 · 모션/침입 이벤트와 클립 보호.</p></div>
+    <div class="card" data-r style="--i:6"><div class="ic">AUTOMATE</div><h3>자동화 · 원격</h3><p>규칙 엔진 · 웹훅 · 알림 · 원격 포털과 다중 NVR 페더레이션.</p></div>
+  </div>
+</section>
+
+<!-- 2 · ARCHITECTURE -->
+<section class="slide" id="s2" data-label="ARCHITECTURE">
+  <div class="slide-head"><span class="num" data-r style="--i:0">02 / 아키텍처</span></div>
+  <h2 data-r style="--i:1">하나의 미디어 코어, <span class="sg">여러 소비자</span></h2>
+  <p class="lead" data-r style="--i:2" style="margin-top:16px; max-width:74ch">go2rtc가 카메라당 단일 연결을 유지하고, 라이브·녹화·AI가 같은 스트림을 나눠 씁니다 — 카메라 부하는 1, 활용은 N.</p>
+  <div class="arch">
+    <div class="acol" data-r style="--i:3">
+      <div class="ch">소스</div>
+      <div class="node"><b>IP 카메라<span class="tag">RTSP/ONVIF</span></b><span>멀티벤더 · 메인/서브 스트림 · 이벤트 알림 구독</span></div>
+      <div class="node"><b>go2rtc<span class="tag">MEDIA HUB</span></b><span>카메라당 1연결을 라이브·녹화·AI로 팬아웃. H.265→H.264 온디맨드 트랜스코드.</span></div>
+      <div class="flowdot"></div>
+    </div>
+    <div class="acol" data-r style="--i:4">
+      <div class="ch">코어 처리</div>
+      <div class="node hub"><b>Backend<span class="tag">FLASK · uWSGI</span></b><span>API · 인증/RBAC · 카메라/정책 관리 · 라이브 프록시</span></div>
+      <div class="node"><b>Recorder</b><span>카메라당 ffmpeg 세그먼트 녹화 + 인덱싱 (감시 루프)</span></div>
+      <div class="node"><b>Celery Workers</b><span>보존정책 · 헬스 · 이벤트 구독 · 알림 비트</span></div>
+      <div class="flowdot" style="animation-delay:.6s"></div>
+    </div>
+    <div class="acol" data-r style="--i:5">
+      <div class="ch">출력 · 저장</div>
+      <div class="node"><b>AI 노드<span class="tag">YOLO · GPU 선택</span></b><span>객체 탐지 · LPR · 얼굴 · 시맨틱 검색(CLIP)</span></div>
+      <div class="node"><b>스토리지</b><span>다중 디스크 세그먼트 · MySQL 인덱스 · Redis · S3/SMB 아카이브</span></div>
+      <div class="node"><b>클라이언트</b><span>웹(React) · 원격 포털 · 페더레이션 허브</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · CAMERAS & LIVE -->
+<section class="slide" id="s3" data-label="CAMERAS · LIVE">
+  <div class="slide-head"><span class="num" data-r style="--i:0">03 / 카메라 · 라이브</span></div>
+  <div class="two">
+    <div>
+      <h2 data-r style="--i:1">붙이면 <span class="sg">바로</span> 보입니다.</h2>
+      <div class="feat-list">
+        <div class="feat" data-r style="--i:2"><div class="k">01</div><div class="t"><b>멀티벤더 자동 탐색</b><span>ONVIF/ISAPI/SUNAPI 디스커버리 · 2단계 추가 마법사 · 벤더별 표시명</span></div></div>
+        <div class="feat" data-r style="--i:3"><div class="k">02</div><div class="t"><b>TURN 없는 저지연 라이브</b><span>WebRTC 우선, 실패 시 MSE(WebSocket) 자동 폴백 — 원격망에서도 TURN 없이 동작</span></div></div>
+        <div class="feat" data-r style="--i:4"><div class="k">03</div><div class="t"><b>카메라 월 · 멀티페이지</b><span>드래그형 그리드, 스팟라이트, 페이지 순환, PTZ · 양방향 음성 · 어안 보정</span></div></div>
+        <div class="feat" data-r style="--i:5"><div class="k">04</div><div class="t"><b>항상 살아있는 썸네일</b><span>레코더가 유지하는 warm 스트림에서 키프레임 정렬 프레임을 캐싱</span></div></div>
+      </div>
+      <div class="pills" data-r style="--i:6" style="margin-top:26px">
+        <span class="pill"><span class="dot"></span>WebRTC</span><span class="pill">MSE / fMP4</span><span class="pill">PTZ</span><span class="pill">양방향 음성</span><span class="pill">어안 WebGL</span>
+      </div>
+    </div>
+    <div class="shot" data-r style="--i:3">
+      <div class="bar"><span class="dot3"><i class="g"></i><i></i><i></i></span><span class="ttl">라이브 · 카메라 월</span><span class="grow"></span><span class="chip">6 / 6 ONLINE</span></div>
+      <div class="wall">
+        <div class="tile spot"><div class="scene sc1"></div><div class="top"><span class="recdot"></span><span class="nm">정문 · 4K</span><span class="grow"></span><span class="live">LIVE</span></div>
+          <div class="bbox" style="left:18%;top:34%;width:20%;height:46%"><span>PERSON 0.96</span></div>
+          <div class="bot"><span>00:14:22</span><span>H.265</span></div></div>
+        <div class="tile"><div class="scene sc4"></div><div class="top"><span class="recdot"></span><span class="nm">주차장 A</span><span class="grow"></span><span class="live">LIVE</span></div>
+          <div class="bbox am" style="left:46%;top:42%;width:34%;height:34%"><span>VEHICLE 0.91</span></div><div class="bot"><span>00:09:51</span></div></div>
+        <div class="tile"><div class="scene sc3"></div><div class="top"><span class="recdot"></span><span class="nm">로비</span><span class="grow"></span><span class="live">LIVE</span></div><div class="bot"><span>00:31:07</span></div></div>
+        <div class="tile"><div class="scene sc6"></div><div class="top"><span class="recdot"></span><span class="nm">복도 2F</span><span class="grow"></span><span class="live">LIVE</span></div><div class="bot"><span>01:02:18</span></div></div>
+        <div class="tile"><div class="scene sc2"></div><div class="top"><span class="recdot"></span><span class="nm">창고</span><span class="grow"></span><span class="live">LIVE</span></div>
+          <div class="bbox" style="left:30%;top:30%;width:22%;height:52%"><span>PERSON 0.88</span></div><div class="bot"><span>00:47:33</span></div></div>
+        <div class="tile off"><div class="scene sc5"></div><div class="top"><span class="nm" style="color:#7a868f">후문</span><span class="grow"></span></div><div class="offlbl">◇ OFFLINE</div></div>
+        <div class="tile"><div class="scene sc4"></div><div class="top"><span class="recdot"></span><span class="nm">주차장 B</span><span class="grow"></span><span class="live">LIVE</span></div><div class="bot"><span>00:22:40</span></div></div>
+        <div class="tile"><div class="scene sc1"></div><div class="top"><span class="recdot"></span><span class="nm">옥상</span><span class="grow"></span><span class="live">LIVE</span></div><div class="bot"><span>03:11:05</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 · RECORDING & RETENTION -->
+<section class="slide" id="s4" data-label="RECORD · RETENTION">
+  <div class="slide-head"><span class="num" data-r style="--i:0">04 / 녹화 · 보존</span></div>
+  <h2 data-r style="--i:1">놓치지 않고, <span class="sg">넘치지 않게.</span></h2>
+  <div class="grid" style="grid-template-columns:repeat(3,1fr); margin-top:34px">
+    <div class="card" data-r style="--i:2"><div class="ic">RECORDER</div><h3>연속 세그먼트 녹화</h3><p>카메라당 ffmpeg 레코더가 10초 세그먼트로 분할 저장. 끊김/재연결 자동 복구, 손상 세그먼트 격리.</p></div>
+    <div class="card" data-r style="--i:3"><div class="ic">RETENTION</div><h3>보존정책 자동 회수</h3><p>보존일수 · 용량 한도(하드 캡) · 디스크 여유공간 3중 기준. 이벤트/북마크 클립은 보호.</p></div>
+    <div class="card" data-r style="--i:4"><div class="ic">PLAYBACK</div><h3>타임라인 재생</h3><p>세그먼트 인덱스 기반 정밀 탐색. 이벤트 마커로 스냅, 연속 클립 자동 연결 재생.</p></div>
+    <div class="card" data-r style="--i:5"><div class="ic">EXPORT</div><h3>안전한 내보내기</h3><p>워터마크 합성 · AES-256 암호 ZIP · 무재인코딩 concat. 공유 링크 발급.</p></div>
+    <div class="card" data-r style="--i:6"><div class="ic">RESILIENCE</div><h3>이중 · 엣지 녹화</h3><p>서브 스트림 이중 녹화, 카메라 SD 카드 갭필(엣지) 가져오기, 다중 디스크 분산.</p></div>
+    <div class="card" data-r style="--i:7"><div class="ic">ARCHIVE</div><h3>장기 아카이브</h3><p>S3 · SMB · 로컬 대상으로 정책 기반 이관. 디스크 헬스 · RAID 모니터링.</p></div>
+  </div>
+</section>
+
+<!-- 5 · EVENTS -->
+<section class="slide" id="s5" data-label="EVENTS">
+  <div class="slide-head"><span class="num" data-r style="--i:0">05 / 이벤트</span></div>
+  <div class="two">
+    <div>
+      <h2 data-r style="--i:1">중요한 순간만<br><span class="sg">정확히</span> 남깁니다.</h2>
+      <p class="lead" data-r style="--i:2" style="margin-top:18px">카메라 이벤트 구독(ISAPI 알림스트림/ONVIF)으로 모션 · 침입 · 라인크로스 · 탬퍼를 수신하고, 정책에 따라 전/후 버퍼를 포함한 클립으로 보호합니다.</p>
+      <div class="feat-list">
+        <div class="feat" data-r style="--i:3"><div class="k">›</div><div class="t"><b>정책 × 스케줄 결합</b><span>이벤트 타입별 record/notify/discard, 요일·시간대 스케줄과 결합</span></div></div>
+        <div class="feat" data-r style="--i:4"><div class="k">›</div><div class="t"><b>전/후 버퍼 클립 보호</b><span>캐시 버퍼에서 이벤트 전 구간까지 복구해 보존</span></div></div>
+        <div class="feat" data-r style="--i:5"><div class="k">›</div><div class="t"><b>타임라인 이벤트 스냅</b><span>클릭하면 가장 가까운 녹화 이벤트로 점프 · 타임랩스 · 북마크</span></div></div>
+      </div>
+    </div>
+    <div class="shot tl-shot" data-r style="--i:3">
+      <div class="bar"><span class="dot3"><i class="g"></i><i></i><i></i></span><span class="ttl">이벤트 · 타임라인</span><span class="grow"></span><span class="chip">정문 · 4K</span></div>
+      <div class="body">
+        <div class="tl-prev"><div class="scene sc1"></div>
+          <div class="tl-hud"><span class="recdot" style="display:inline-block;width:6px;height:6px;border-radius:50%"></span><span>2026-06-15 14:22:08</span><span style="margin-left:auto" class="sg">INTRUSION</span></div>
+          <div class="bbox am" style="left:30%;top:34%;width:24%;height:50%"><span>INTRUSION</span></div>
+        </div>
+        <div class="timeline">
+          <div class="tl-times"><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span></div>
+          <div class="track">
+            <div class="cov" style="left:3%;width:24%"></div><div class="cov" style="left:31%;width:9%"></div>
+            <div class="cov" style="left:44%;width:31%"></div><div class="cov" style="left:79%;width:17%"></div>
+            <div class="mk mo" style="left:12%"></div><div class="mk in" style="left:21%"></div><div class="mk mo" style="left:35%"></div>
+            <div class="mk mo" style="left:49%"></div><div class="mk in" style="left:58%"></div><div class="mk mo" style="left:67%"></div><div class="mk in" style="left:85%"></div>
+            <div class="play" style="left:58%"></div>
+          </div>
+        </div>
+        <div class="evlist">
+          <div class="evrow sel"><span class="tm">14:22:08</span><span class="ty"><i style="background:var(--amber)"></i>침입 감지</span><span class="sc">0.93</span><span class="badge rec">REC</span></div>
+          <div class="evrow"><span class="tm">14:09:51</span><span class="ty"><i style="background:var(--cyan)"></i>모션</span><span class="sc">0.81</span><span class="badge rec">REC</span></div>
+          <div class="evrow"><span class="tm">13:46:30</span><span class="ty"><i style="background:var(--amber)"></i>라인크로스</span><span class="sc">0.88</span><span class="badge rec">REC</span></div>
+          <div class="evrow"><span class="tm">13:31:12</span><span class="ty"><i style="background:var(--cyan)"></i>모션</span><span class="sc">0.74</span><span class="badge notif">알림</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 · AI DETECTION -->
+<section class="slide" id="s6" data-label="AI DETECTION">
+  <div class="slide-head"><span class="num" data-r style="--i:0">06 / AI 객체 탐지</span></div>
+  <div class="two">
+    <div>
+      <h2 data-r style="--i:1">사람 · 차량 · 그 이상을<br><span class="sg">읽어냅니다.</span></h2>
+      <div class="feat-list">
+        <div class="feat" data-r style="--i:2"><div class="k">01</div><div class="t"><b>YOLO 노드 · GPU 선택</b><span>분산 AI 노드에 카메라 자동 배정 · 헬스/리밸런스 · GPU 없이도 동작</span></div></div>
+        <div class="feat" data-r style="--i:3"><div class="k">02</div><div class="t"><b>탐지 영역 · 트리거</b><span>관심 영역(zone) 지정, 객체 트리거로 이벤트/녹화 자동 시작</span></div></div>
+        <div class="feat" data-r style="--i:4"><div class="k">03</div><div class="t"><b>시맨틱 검색</b><span>CLIP 임베딩으로 "빨간 차" 같은 자연어 장면 검색</span></div></div>
+        <div class="feat" data-r style="--i:5"><div class="k">04</div><div class="t"><b>고급 분석</b><span>인원 카운팅 · 배회(loitering) · 동물 · 연기/화재 · 오디오 분류</span></div></div>
+      </div>
+    </div>
+    <div class="shot" data-r style="--i:3">
+      <div class="bar"><span class="dot3"><i class="g"></i><i></i><i></i></span><span class="ttl">AI · 객체 탐지</span><span class="grow"></span><span class="chip">YOLOv8 · GPU</span></div>
+      <div class="detect">
+        <div class="view"><div class="scene sc4" style="position:absolute;inset:0"></div>
+          <div class="zone" style="left:8%;top:14%;width:48%;height:74%"><span>ZONE · 진입로</span></div>
+          <div class="bbox" style="left:16%;top:30%;width:18%;height:52%"><span>PERSON 0.96</span></div>
+          <div class="bbox am" style="left:52%;top:46%;width:36%;height:34%"><span>VEHICLE 0.91</span></div>
+          <div class="bbox" style="left:74%;top:24%;width:13%;height:30%"><span>PERSON 0.79</span></div>
+        </div>
+        <div class="panel">
+          <p class="lbl">탐지 클래스</p>
+          <div class="cls"><span class="n">person</span><span class="bar"><i style="width:96%"></i></span><span class="v">.96</span></div>
+          <div class="cls"><span class="n">vehicle</span><span class="bar"><i style="width:91%"></i></span><span class="v">.91</span></div>
+          <div class="cls"><span class="n">bicycle</span><span class="bar"><i style="width:64%"></i></span><span class="v">.64</span></div>
+          <div class="cls"><span class="n">animal</span><span class="bar"><i style="width:41%"></i></span><span class="v">.41</span></div>
+          <p class="lbl" style="margin-top:18px">노드 · 모델</p>
+          <div class="cls"><span class="n" style="min-width:auto;color:var(--ink)">node-gpu-01</span><span class="grow" style="flex:1"></span><span class="v" style="color:var(--signal)">ONLINE</span></div>
+          <div class="cls"><span class="n" style="min-width:auto">yolov8n · 14ms</span><span class="grow" style="flex:1"></span><span class="v" style="color:var(--muted)">3 cams</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · LPR & FACE -->
+<section class="slide" id="s7" data-label="LPR · FACE">
+  <div class="slide-head"><span class="num" data-r style="--i:0">07 / 번호판 · 얼굴</span></div>
+  <h2 data-r style="--i:1">신원은 식별하되, <span class="sg">동의를 전제로.</span></h2>
+  <div class="grid" style="grid-template-columns:repeat(2,1fr); gap:18px; margin-top:34px">
+    <div class="card" data-r style="--i:2"><div class="ic">LPR · P7a</div><h3>번호판 인식 + 워치리스트</h3>
+      <p>차량 번호판을 읽어 이벤트로 기록하고, 워치리스트 등록 차량 진입 시 즉시 경보. 정규화된 플레이트 매칭.</p>
+      <div class="pills" style="margin-top:16px"><span class="pill mono">12가 3456</span><span class="pill mono" style="border-color:rgba(245,177,60,.4);color:var(--amber)">⚑ WATCHLIST</span></div></div>
+    <div class="card" data-r style="--i:3"><div class="ic">FACE · P7b</div><h3>동의 기반 얼굴 인식</h3>
+      <p>동의된 신원 레지스트리에 한해 코사인 매칭. 브루트포스 방지, GDPR 삭제권(완전 소거) 지원.</p>
+      <div class="pills" style="margin-top:16px"><span class="pill"><span class="dot"></span>CONSENTED</span><span class="pill">코사인 매칭</span><span class="pill">ERASURE</span></div></div>
+  </div>
+  <p class="lead" data-r style="--i:4" style="margin-top:26px; max-width:80ch">두 기능 모두 플래그로 기본 비활성. 전용 모델 노드에서만 동작하며, 개인정보는 명시적 동의와 삭제 절차에 따라 관리됩니다.</p>
+</section>
+
+<!-- 8 · AUTOMATION & ACCESS -->
+<section class="slide" id="s8" data-label="AUTOMATION · ACCESS">
+  <div class="slide-head"><span class="num" data-r style="--i:0">08 / 자동화 · 출입통제</span></div>
+  <div class="two">
+    <div>
+      <h2 data-r style="--i:1">감지에서 <span class="sg">행동</span>까지.</h2>
+      <div class="feat-list">
+        <div class="feat" data-r style="--i:2"><div class="k">01</div><div class="t"><b>규칙 엔진</b><span>시스템 이벤트·웹훅·얼굴/객체 트리거 → AND/OR 상관 → 액션</span></div></div>
+        <div class="feat" data-r style="--i:3"><div class="k">02</div><div class="t"><b>다양한 액션</b><span>웹훅 · SMS(Twilio) · 알림 · 카메라 활성/비활성 · 녹화 시작</span></div></div>
+        <div class="feat" data-r style="--i:4"><div class="k">03</div><div class="t"><b>외부 API · 토큰</b><span>스코프 토큰 기반 외부 API(/ext), 아웃박스로 at-least-once 보장</span></div></div>
+        <div class="feat" data-r style="--i:5"><div class="k">04</div><div class="t"><b>출입통제 · P10</b><span>도어 · 출입자격증명 관리, 접근 이벤트(허용/거부) 연동</span></div></div>
+      </div>
+    </div>
+    <div data-r style="--i:3">
+      <div class="card" style="margin-bottom:14px"><div class="ic">RULE · #14</div><h3 style="margin-top:8px">야간 침입 → 다중 알림</h3>
+        <p style="margin-top:6px"><span class="cy">WHEN</span> 침입 감지 <span class="sg">AND</span> 스케줄=야간<br>
+        <span class="cy">THEN</span> 녹화 시작 · SMS 발송 · 웹훅 POST · 스팟라이트</p></div>
+      <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat"><b><em>AND</em>/OR</b><span>상관 트리거</span></div>
+        <div class="stat"><b>웹훅</b><span>인바운드/아웃</span></div>
+        <div class="stat"><b>SMS</b><span>Twilio</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 · SCALE -->
+<section class="slide" id="s9" data-label="SCALE · REMOTE">
+  <div class="slide-head"><span class="num" data-r style="--i:0">09 / 확장 · 원격</span></div>
+  <h2 data-r style="--i:1">한 대를 넘어, <span class="sg">현장 전체로.</span></h2>
+  <div class="grid" style="grid-template-columns:repeat(2,1fr); gap:18px; margin-top:34px">
+    <div class="card" data-r style="--i:2"><div class="ic">FEDERATION · P8</div><h3>다중 NVR 페더레이션</h3>
+      <p>허브가 여러 멤버 NVR의 카메라·이벤트를 외부 API로 집계. 동기화 캐시 + 실시간 이벤트 팬아웃으로 다지점을 하나의 화면에서.</p>
+      <div class="pills" style="margin-top:16px"><span class="pill"><span class="dot"></span>HUB</span><span class="pill">멤버 NVR ×N</span><span class="pill">Fernet 토큰</span></div></div>
+    <div class="card" data-r style="--i:3"><div class="ic">PORTAL · P9</div><h3>원격 포털</h3>
+      <p>coturn 방식 임시 TURN 자격증명(HMAC)으로 원격망에서도 라이브·양방향 음성 WebRTC 연결. 설정 가능한 ICE 서버.</p>
+      <div class="pills" style="margin-top:16px"><span class="pill">TURN · HMAC</span><span class="pill">ICE</span><span class="pill">암호화</span></div></div>
+  </div>
+  <p class="lead" data-r style="--i:4" style="margin-top:26px; max-width:82ch">단일 서버 MVP에서 시작해, 필요할 때 AI 노드·멤버 NVR·원격 포털을 더하는 수평 확장 구조입니다.</p>
+</section>
+
+<!-- 10 · ADVANTAGES -->
+<section class="slide" id="s10" data-label="ADVANTAGES">
+  <div class="slide-head"><span class="num" data-r style="--i:0">10 / 장점</span></div>
+  <h2 data-r style="--i:1">왜 <span class="sg">AeroXProtect</span>인가</h2>
+  <div class="adv" style="margin-top:34px">
+    <div class="card" data-r style="--i:2"><div class="big">⌂</div><h3>완전한 자체 호스팅</h3><p>영상·메타데이터가 내 인프라 안에. 클라우드 종속·구독료·외부 유출 위험 없음.</p></div>
+    <div class="card" data-r style="--i:3"><div class="big">⚡</div><h3>TURN-free 저지연</h3><p>WebRTC→MSE 자동 폴백으로 원격에서도 추가 인프라 없이 즉시 라이브.</p></div>
+    <div class="card" data-r style="--i:4"><div class="big">⊞</div><h3>벤더 종속 없음</h3><p>ONVIF/ISAPI/SUNAPI 표준 연결 — 기존 카메라 자산을 그대로 활용.</p></div>
+    <div class="card" data-r style="--i:5"><div class="big">◎</div><h3>GPU 선택형 AI</h3><p>탐지·LPR·얼굴을 노드로 분산. GPU 있으면 가속, 없으면 CPU 폴백.</p></div>
+    <div class="card" data-r style="--i:6"><div class="big">⚖</div><h3>프라이버시 · 컴플라이언스</h3><p>프라이버시 마스크 · 동의 기반 얼굴 · GDPR 삭제 · 감사 로그 · RBAC.</p></div>
+    <div class="card" data-r style="--i:7"><div class="big">⤢</div><h3>확장 · 견고함</h3><p>페더레이션·다중 디스크·이중/엣지 녹화·자동 복구. 450+ 테스트로 검증.</p></div>
+  </div>
+</section>
+
+<!-- 11 · TECH STACK -->
+<section class="slide" id="s11" data-label="TECH STACK">
+  <div class="slide-head"><span class="num" data-r style="--i:0">11 / 기술 스택</span></div>
+  <h2 data-r style="--i:1">검증된 구성요소로 <span class="sg">단단하게</span></h2>
+  <div class="tech">
+    <div data-r style="--i:2"><div class="trow"><span class="l">Media</span><span class="v"><b>go2rtc</b> · RTSP/WebRTC/MSE 미디어 허브, ffmpeg 트랜스코드</span></div></div>
+    <div data-r style="--i:3"><div class="trow"><span class="l">Backend</span><span class="v"><b>Python · Flask · uWSGI</b> · REST API & 라이브 프록시</span></div></div>
+    <div data-r style="--i:4"><div class="trow"><span class="l">Workers</span><span class="v"><b>Celery</b> · 보존·헬스·이벤트 구독·알림 비트</span></div></div>
+    <div data-r style="--i:5"><div class="trow"><span class="l">Data</span><span class="v"><b>MySQL · Redis</b> · 세그먼트 인덱스 · 캐시 · 브로커</span></div></div>
+    <div data-r style="--i:6"><div class="trow"><span class="l">AI</span><span class="v"><b>YOLO · CLIP</b> · 객체 탐지 · 시맨틱 검색 (GPU 선택)</span></div></div>
+    <div data-r style="--i:7"><div class="trow"><span class="l">Frontend</span><span class="v"><b>React · TypeScript · Tailwind</b> · i18n(한/영)</span></div></div>
+    <div data-r style="--i:8"><div class="trow"><span class="l">Deploy</span><span class="v"><b>Docker Compose</b> · backend · worker · recorder · subs · detector</span></div></div>
+    <div data-r style="--i:9"><div class="trow"><span class="l">Quality</span><span class="v"><b>pytest 450+</b> · E2E 체크 · 다단계 보안 감사</span></div></div>
+  </div>
+</section>
+
+<!-- 12 · CLOSING -->
+<section class="slide" id="sEnd" data-label="STANDBY">
+  <div class="tagline" data-r style="--i:0" style="font-family:var(--mono);color:var(--signal);letter-spacing:.18em;font-size:13px;text-transform:uppercase">하나의 플랫폼 · 전체 영상 보안</div>
+  <h1 data-r style="--i:1" style="margin-top:18px;font-size:clamp(40px,6.5vw,96px)">내 영상은,<br><span class="sg">내 통제</span> 아래.</h1>
+  <div class="end-stats">
+    <div class="stat" data-r style="--i:2"><b><em>P0–P10</em></b><span>완성된 10단계 로드맵</span></div>
+    <div class="stat" data-r style="--i:3"><b><em>멀티</em>벤더</b><span>ONVIF · ISAPI · SUNAPI</span></div>
+    <div class="stat" data-r style="--i:4"><b><em>450+</em></b><span>자동화 테스트 통과</span></div>
+    <div class="stat" data-r style="--i:5"><b>자체호스팅</b><span>클라우드 종속 없음</span></div>
+  </div>
+  <p class="lead" data-r style="--i:6" style="margin-top:40px">AeroXProtect — 카메라 · 녹화 · AI · 자동화 · 원격을 하나로.</p>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var labels=slides.map(function(s){return s.getAttribute('data-label')||''});
+  var i=0, n=slides.length;
+  document.getElementById('tot').textContent=String(n).padStart(2,'0');
+  // build dotnav
+  var dn=document.getElementById('dots');
+  slides.forEach(function(_,k){var b=document.createElement('b'); b.addEventListener('click',function(){go(k)}); dn.appendChild(b)});
+  var dots=[].slice.call(dn.children);
+  var pad=function(x){return String(x+1).padStart(2,'0')};
+  function render(){
+    slides.forEach(function(s,k){
+      s.classList.toggle('active',k===i);
+      s.classList.toggle('prev',k<i);
+    });
+    dots.forEach(function(d,k){d.classList.toggle('on',k===i)});
+    document.getElementById('cur').textContent=pad(i);
+    document.getElementById('prog').style.width=((i)/(n-1)*100)+'%';
+    document.getElementById('secLabel').textContent=labels[i];
+  }
+  function go(k){ i=Math.max(0,Math.min(n-1,k)); render();
+    if(('#'+i)!==location.hash){ try{history.replaceState(null,'','#'+i)}catch(_){} } }
+  function next(){ if(i<n-1) go(i+1); }
+  function prev(){ if(i>0) go(i-1); }
+  var h=parseInt((location.hash||'').slice(1),10); if(!isNaN(h)) i=Math.max(0,Math.min(n-1,h));
+  render();
+  addEventListener('hashchange',function(){var k=parseInt(location.hash.slice(1),10); if(!isNaN(k)&&k!==i) go(k);});
+  document.addEventListener('keydown',function(e){
+    if(['ArrowRight','ArrowDown','PageDown',' '].indexOf(e.key)>=0){e.preventDefault(); next();}
+    else if(['ArrowLeft','ArrowUp','PageUp'].indexOf(e.key)>=0){e.preventDefault(); prev();}
+    else if(e.key==='Home'){go(0)} else if(e.key==='End'){go(n-1)}
+    else if(e.key==='f'||e.key==='F'){ if(!document.fullscreenElement){document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();} else {document.exitFullscreen&&document.exitFullscreen();} }
+  });
+  // click zones (ignore clicks on dotnav)
+  document.getElementById('deck').addEventListener('click',function(e){
+    var x=e.clientX/window.innerWidth; if(x>0.62) next(); else if(x<0.38) prev();
+  });
+  // swipe
+  var sx=0; addEventListener('touchstart',function(e){sx=e.touches[0].clientX},{passive:true});
+  addEventListener('touchend',function(e){var dx=e.changedTouches[0].clientX-sx; if(Math.abs(dx)>50){dx<0?next():prev()}});
+  // running timecode (browser runtime — fine here)
+  function tick(){var d=new Date(); var p=function(x){return String(x).padStart(2,'0')};
+    document.getElementById('tc').textContent=p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
+  tick(); setInterval(tick,1000);
+})();
+</script>
+</body>
+</html>

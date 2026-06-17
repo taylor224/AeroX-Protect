@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design tokens (DESIGN.md → CSS variables) ─────────────────────────────── */
+:root {
+  /* accent (CTA only) */
+  --axp-primary: #3e6ae1;
+  --axp-primary-foreground: #ffffff;
+  /* surfaces */
+  --axp-surface: #ffffff;        /* pure-white UI panels */
+  --axp-surface-alt: #f5f6f8;    /* cool light app surface (content area) */
+  --axp-canvas: #171a20;         /* Carbon Dark — video grid */
+  /* text */
+  --axp-text: #1b1d21;
+  --axp-text-secondary: #3a3d42;
+  --axp-text-tertiary: #6b6f76;
+  --axp-placeholder: #9aa0a6;
+  /* lines */
+  --axp-border: #e7e8eb;         /* soft hairline */
+  --axp-border-strong: #d3d5d9;  /* Pale Silver */
+  /* status */
+  --axp-online: #16a34a;
+  --axp-offline: #9aa0a6;
+
+  /* shadcn semantic tokens mapped onto the AeroX Protect palette */
+  --background: var(--axp-surface);
+  --foreground: var(--axp-text);
+  --card: var(--axp-surface);
+  --card-foreground: var(--axp-text);
+  --popover: var(--axp-surface);
+  --popover-foreground: var(--axp-text);
+  --primary: var(--axp-primary);
+  --primary-foreground: var(--axp-primary-foreground);
+  --secondary: var(--axp-surface-alt);
+  --secondary-foreground: var(--axp-text);
+  --muted: var(--axp-surface-alt);
+  --muted-foreground: var(--axp-text-tertiary);
+  --accent: var(--axp-surface-alt);
+  --accent-foreground: var(--axp-text);
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --border: var(--axp-border);
+  --input: var(--axp-border-strong);
+  --ring: var(--axp-primary);
+  --canvas: var(--axp-canvas);
+  --radius: 4px;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--foreground);
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* DESIGN.md §6/§7: no shadows — elevation via border/spacing/opacity only. */
+.axp-no-shadow,
+.axp-no-shadow * {
+  box-shadow: none !important;
+}
+
+/* react-grid-layout — live wall edit mode */
+.react-grid-item.react-grid-placeholder {
+  background: hsl(var(--primary) / 0.25);
+  border: 1px dashed hsl(var(--primary));
+  border-radius: 4px;
+  opacity: 1;
+}
+.react-grid-item > .react-resizable-handle::after {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+/* edge resize handles (e/s) — invisible but grabbable strips with the right cursor */
+.react-grid-item > .react-resizable-handle-e {
+  right: 0; top: 0; height: 100%; width: 10px; margin: 0; transform: none;
+  cursor: ew-resize; background: none;
+}
+.react-grid-item > .react-resizable-handle-s {
+  bottom: 0; left: 0; width: 100%; height: 10px; margin: 0; transform: none;
+  cursor: ns-resize; background: none;
+}
+.react-grid-item > .react-resizable-handle-e::after,
+.react-grid-item > .react-resizable-handle-s::after {
+  display: none;
+}

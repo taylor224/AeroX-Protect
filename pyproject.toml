@@ -1,0 +1,60 @@
+[project]
+name = "axp"
+version = "0.0.1"
+description = "AeroXProtect — open-source NVR (Network Video Recorder)"
+authors = [
+    {name = "Taylor Hoshino", email = "taylor@kloa.kr"}
+]
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "flask (==3.1.2)",
+    "sqlalchemy (==2.0.45)",
+    "pymysql (==1.1.2)",
+    "redis (==7.1.0)",
+    "celery (==5.6.0)",
+    "flask_cors (==6.0.2)",
+    "sentry-sdk (==2.48.0)",
+    "argon2-cffi (==25.1.0)",
+    "cryptography (==46.0.4)",
+    "pyjwt (==2.10.1)",
+    "python-dateutil (==2.9.0)",
+    "requests (==2.32.5)",
+    "onvif-zeep (==0.2.12)",
+    "WSDiscovery (==2.1.0)",
+    "psutil (==6.1.1)",
+    "watchdog (==6.0.0)",
+    "pyzipper (>=0.3.6,<0.4.0)",
+    "boto3 (>=1.34.0,<2.0.0)",
+    "smbprotocol (>=1.12.0,<2.0.0)",
+]
+
+
+[build-system]
+requires = ["poetry-core==2.2.1"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry]
+packages = [
+    { include = "server" },
+]
+package-mode = false
+
+
+[tool.poetry.scripts]
+migrate = "server.command:migrate"
+seed = "server.command:seed"
+seed-admin = "server.command:seed_admin"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-cov = "^7.1.0"
+fakeredis = "^2.26.0"
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

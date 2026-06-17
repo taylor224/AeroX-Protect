@@ -1,0 +1,6 @@
+# Light runtime: node agent (join/heartbeat/assignments/report) + health server.
+# With these only the detector runs the distributed infra with the FakeDetector fallback
+# (no real inference). For real YOLO add requirements-inference.txt (heavy: torch/ultralytics).
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1

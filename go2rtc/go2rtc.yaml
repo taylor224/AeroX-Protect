@@ -1,0 +1,26 @@
+# go2rtc base config (P0). P1 generates stream entries dynamically via the REST API
+# (:1984/api). Streams resolve to rtsp://axp-go2rtc:8554/{go2rtc_name} (PLAN §12.1).
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+# The candidate list is what browsers receive in the SDP — it must be reachable FROM the
+# viewer, never the Docker-internal service name (browsers can't resolve axp-go2rtc, so
+# ICE always failed and every tile burned a 3s WebRTC timeout before falling back to MSE).
+# `stun:8555` makes go2rtc discover its public IP via STUN (needs 8555/udp forwarded).
+# For LAN viewers add the host's LAN IP explicitly, e.g. `- 192.168.0.10:8555`.
+webrtc:
+  listen: ":8555"
+  candidates:
+    - stun:8555
+
+# Camera sources are injected here by the backend Go2rtcDriver in P1.
+# For no-real-camera e2e (tests/_p[1234]_*_check.py), add a synthetic exec: source, e.g.
+#   cam_synthetic_main: exec:ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=15 ... -f rtsp {output}
+# (exec: sources must live in yaml — go2rtc 1.9.4 rejects them via REST) then restart go2rtc.
+streams: {}
+
+log:
+  level: info

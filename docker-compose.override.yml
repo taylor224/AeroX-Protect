@@ -1,0 +1,35 @@
+# Development overrides (auto-merged by `docker compose up`).
+#   - PROJECT_ENV=development  => debug logging + non-secure refresh cookie
+#   - backend/worker/recorder source bind-mounted for hot reload
+# Frontend hot reload: run `cd frontend && npm run dev` locally (the image serves a
+# production build). Remove/rename this file for a production-like run.
+
+services:
+  axp-backend:
+    environment:
+      PROJECT_ENV: development
+    command: ["python", "-m", "server"]
+    volumes:
+      - ./server:/usr/src/app/server
+      - ./worker:/usr/src/app/worker
+      - ./config.py:/usr/src/app/config.py
+      - ./migrations:/usr/src/app/migrations
+      - axp-media:/media
+      - ./go2rtc:/go2rtc
+
+  axp-worker:
+    environment:
+      PROJECT_ENV: development
+    volumes:
+      - ./server:/usr/src/app/server
+      - ./worker:/usr/src/app/worker
+      - ./config.py:/usr/src/app/config.py
+      - axp-media:/media
+
+  axp-recorder:
+    environment:
+      PROJECT_ENV: development
+    volumes:
+      - ./server:/usr/src/app/server
+      - ./worker:/usr/src/app/worker
+      - ./config.py:/usr/src/app/config.py
