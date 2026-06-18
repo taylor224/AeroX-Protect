@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { cn } from '@/lib/utils';
+import { acquireStartSlot } from '@/pages/live/connectGate';
 import { getWsTicket, liveMp4Url, liveWsUrl, webrtcExchange } from '@/pages/live/live.api';
 import { connectMse, mseSupported } from '@/pages/live/mseStream';
 import { getIceServers } from '@/pages/live/portal.api';
@@ -14,24 +15,25 @@ const RATIO_CLASS: Record<RatioMode, string> = {
 
 type PlayerState = 'connecting' | 'webrtc' | 'ws' | 'mp4' | 'error';
 
-// WebRTC reachability is a property of the network, not of one camera: when ICE fails for
-// one tile it will fail for all of them. Remember the failure so subsequent connects (other
-// tiles, watchdog reloads) skip the WebRTC probe window and start on MSE/WS immediately,
-// instead of every tile burning seconds on a doomed PeerConnection.
-let webrtcFailedAt = 0;
-const WEBRTC_RETRY_MS = 5 * 60_000;
-
 // An on-demand H.265→H.264 transcode cold-starts and must wait for the first keyframe, which
-// can take >8s on a loaded box. Too short a stall window here fires the watchdog mid-startup,
+// can take >10s on a loaded box. Too short a stall window here fires the watchdog mid-startup,
 // tearing down and restarting the transcode in a loop (never stabilises). Give it real room.
 const WATCHDOG_STALL_MS = 15000;
 
+// A transient WebSocket drop (go2rtc restart/self-heal, brief network blip) should reconnect
+// the same MSE path a couple of times before downgrading — a single hiccup shouldn't strand
+// the tile on the higher-latency fMP4 fallback until the next watchdog reload.
+const MSE_MAX_RETRIES = 2;
+
 /**
- * Live engine, in order of preference:
- *   1. WebRTC      — lowest latency, passthrough (best on LAN; needs TURN to traverse some
- *                    remote NATs, hence the timeout/ICE-failure fallback)
- *   2. MSE/WebSocket — low latency AND TURN-free; works from remote networks over plain TCP
- *   3. fMP4 stream — universal HTTP fallback, no WebSocket required
+ * Live engine, in order of preference (mirrors Frigate, which drives the same go2rtc engine):
+ *   1. MSE/WebSocket — PRIMARY. Plain TCP through nginx straight to go2rtc: no ICE, no UDP
+ *                      port-forwarding, no candidate juggling, and it doesn't drop frames.
+ *                      Works on the LAN and from remote networks (TURN-free).
+ *   2. WebRTC        — fallback only. Lowest latency but fragile (needs ICE + UDP 8555 and
+ *                      correctly-advertised candidates), so it's used when MSE is unsupported
+ *                      (old iPhone Safari) or has failed, and we bail to fMP4 fast on trouble.
+ *   3. fMP4 stream   — universal HTTP last resort, no WebSocket required.
  * Every path goes through the JWT+scope-guarded proxy — the browser never reaches go2rtc directly.
  */
 export function VideoPlayer({
@@ -72,10 +74,12 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     let cancelled = false;
-    let settled = false; // a non-WebRTC path has taken over
+    let settled = false; // a transport owns the <video> element
     let webrtcLive = false; // WebRTC delivered media — don't let the timeout tear it down
+    let mseRetries = 0;
     let pc: RTCPeerConnection | null = null;
     let wsTeardown: (() => void) | null = null;
+    let webrtcTimer = 0;
 
     const closePc = () => {
       if (pc) {
@@ -93,6 +97,7 @@ export function VideoPlayer({
     const fallbackToMp4 = () => {
       if (cancelled) return;
       settled = true;
+      window.clearTimeout(webrtcTimer);
       clearWs();
       closePc();
       video.srcObject = null;
@@ -101,11 +106,12 @@ export function VideoPlayer({
       void video.play().catch(() => setState('error'));
     };
 
+    // PRIMARY transport. On a transient drop, reconnect MSE a couple of times before
+    // handing off to the WebRTC/fMP4 fallbacks (see MSE_MAX_RETRIES).
     const tryWs = async () => {
       if (cancelled || settled) return;
-      if (attemptedWebrtc) webrtcFailedAt = Date.now(); // WebRTC was tried and didn't deliver
       if (!mseSupported()) {
-        fallbackToMp4();
+        void tryWebRTC(); // old iPhone Safari has no MSE — go straight to the WebRTC fallback
         return;
       }
       settled = true;
@@ -117,36 +123,59 @@ export function VideoPlayer({
         if (cancelled) return;
         wsTeardown = connectMse(video, liveWsUrl(go2rtcName, ticket), {
           onPlaying: () => {
-            if (!cancelled) setState('ws');
+            if (cancelled) return;
+            mseRetries = 0; // a clean start resets the reconnect budget
+            setState('ws');
           },
           onError: () => {
-            settled = false; // allow the mp4 fallback to take over
-            fallbackToMp4();
+            clearWs();
+            if (cancelled) return;
+            settled = false;
+            if (mseRetries < MSE_MAX_RETRIES) {
+              mseRetries++;
+              window.setTimeout(() => {
+                if (!cancelled) void tryWs();
+              }, 500 * mseRetries); // brief, growing backoff
+            } else {
+              void tryWebRTC();
+            }
           },
         });
       } catch {
         settled = false;
-        fallbackToMp4();
+        void tryWebRTC();
       }
     };
 
+    // FALLBACK transport. Fragile (ICE + UDP 8555), so we give it a short window and drop to
+    // the universal fMP4 stream on any failure rather than retrying a doomed PeerConnection.
     const tryWebRTC = async () => {
+      if (cancelled || settled) return;
+      settled = true;
+      clearWs();
+      video.srcObject = null;
+      setState('connecting');
+      // overall deadline: if WebRTC hasn't delivered media shortly, don't hang on it
+      webrtcTimer = window.setTimeout(() => {
+        if (!cancelled && !webrtcLive) fallbackToMp4();
+      }, 3000);
       try {
         pc = new RTCPeerConnection({ iceServers: await getIceServers() });
         pc.addTransceiver('video', { direction: 'recvonly' });
         pc.addTransceiver('audio', { direction: 'recvonly' });
         pc.ontrack = (e) => {
-          if (cancelled || settled) return;
+          if (cancelled) return;
+          window.clearTimeout(webrtcTimer);
           webrtcLive = true;
           video.srcObject = e.streams[0];
           setState('webrtc');
           void video.play().catch(() => {});
         };
         pc.oniceconnectionstatechange = () => {
-          if (!pc || cancelled || settled) return;
+          if (!pc || cancelled) return;
           if (pc.iceConnectionState === 'failed') {
             webrtcLive = false;
-            void tryWs(); // remote NAT w/o TURN (or mid-stream drop) → switch fast
+            fallbackToMp4(); // remote NAT w/o TURN (or mid-stream drop) → universal path
           }
         };
         const offer = await pc.createOffer();
@@ -154,32 +183,27 @@ export function VideoPlayer({
         const answer = await webrtcExchange(go2rtcName, offer.sdp ?? '');
         if (cancelled) return;
         if (!answer) {
-          void tryWs();
+          fallbackToMp4();
           return;
         }
         await pc.setRemoteDescription({ type: 'answer', sdp: answer });
       } catch {
-        void tryWs();
+        fallbackToMp4();
       }
     };
 
-    // give WebRTC a short window to deliver media, else move to the TURN-free WS path.
-    // If WebRTC recently failed on this network, skip the probe entirely.
-    let timer = 0;
-    let attemptedWebrtc = false;
-    if (Date.now() - webrtcFailedAt < WEBRTC_RETRY_MS) {
-      void tryWs();
-    } else {
-      attemptedWebrtc = true;
-      void tryWebRTC();
-      timer = window.setTimeout(() => {
-        if (!cancelled && !settled && !webrtcLive) void tryWs();
-      }, 3000);
-    }
+    // start on the primary transport (or the WebRTC fallback when MSE is unsupported), but
+    // stagger the start across tiles so a full page doesn't connect all at once. The spinner
+    // shows during the brief wait; the watchdog stays idle until a path is actually live.
+    void acquireStartSlot().then(() => {
+      if (cancelled) return;
+      if (mseSupported()) void tryWs();
+      else void tryWebRTC();
+    });
 
     // stall watchdog: live video should always advance. If a path has taken over but
-    // playback freezes (WebRTC track stalls, MSE buffer gap, transcode keyframe hiccup) for
-    // ~8s, tear everything down and re-init from scratch — auto-recovers the occasional cut.
+    // playback freezes (MSE buffer gap, WebRTC track stall, transcode keyframe hiccup) for
+    // the stall window, tear everything down and re-init from scratch — auto-recovers cuts.
     let lastT = -1;
     let lastProgress = Date.now();
     const watchdog = window.setInterval(() => {
@@ -203,7 +227,7 @@ export function VideoPlayer({
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      window.clearTimeout(webrtcTimer);
       window.clearInterval(watchdog);
       clearWs();
       closePc();
