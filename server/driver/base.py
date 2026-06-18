@@ -53,6 +53,7 @@ class StreamProfile:
     bitrate_kbps: int | None = None
     audio_codec: str | None = None
     rtsp_path: str | None = None
+    rtsp_port: int | None = None    # port advertised by the device (onvif GetStreamUri); None = unknown
     token: str | None = None        # vendor profile token (onvif)
 
     def to_dict(self) -> dict:

@@ -348,6 +348,7 @@
   "discovery.none": "발견된 카메라가 없습니다. 같은 서브넷에 있는지, 컨테이너가 호스트 네트워크를 쓰는지 확인하세요.",
   "discovery.failed": "검색에 실패했습니다.",
   "camera.name": "이름",
+  "camera.name_placeholder": "예: 현관",
   "camera.host": "IP / 호스트",
   "camera.vendor": "제조사",
   "camera.fisheye": "어안 디워핑 (클라이언트)",

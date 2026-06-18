@@ -65,6 +65,7 @@ export interface ProbeResult {
   streams: Partial<Stream>[];
   capabilities: unknown;
   reachable: { onvif?: boolean; vendor_api?: boolean; rtsp?: boolean | null };
+  detected_rtsp_port?: number | null;
   status?: string;
   error?: string;
 }

@@ -91,18 +91,23 @@ class OnvifDriver(CameraDriver):
                 rate = getattr(vec, 'RateControl', None)
                 if rate is not None:
                     fps = getattr(rate, 'FrameRateLimit', None)
-            rtsp_path = None
+            rtsp_path = rtsp_port = None
             try:
                 uri = self._media.GetStreamUri(
                     {'StreamSetup': {'Stream': 'RTP-Unicast', 'Transport': {'Protocol': 'RTSP'}},
                      'ProfileToken': p.token})
-                rtsp_path = urlparse(getattr(uri, 'Uri', '') or '').path or None
+                parts = urlparse(getattr(uri, 'Uri', '') or '')
+                rtsp_path = parts.path or None
+                try:
+                    rtsp_port = parts.port  # device-advertised port; reveals non-default (e.g. 10554)
+                except ValueError:
+                    rtsp_port = None
             except Exception:
                 pass
             parsed.append(StreamProfile(
                 role='main', codec=codec,
                 width=int(width) if width else None, height=int(height) if height else None,
-                fps=int(fps) if fps else None, rtsp_path=rtsp_path, token=p.token))
+                fps=int(fps) if fps else None, rtsp_path=rtsp_path, rtsp_port=rtsp_port, token=p.token))
         # assign roles by descending resolution: largest=main, then sub/third
         parsed.sort(key=lambda s: (s.width or 0) * (s.height or 0), reverse=True)
         for i, s in enumerate(parsed):

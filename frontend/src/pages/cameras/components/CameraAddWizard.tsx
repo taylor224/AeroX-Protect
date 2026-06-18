@@ -113,7 +113,11 @@ export function CameraAddWizard({ onCreated }: { onCreated: () => void }) {
     try {
       const r = await probeCamera(conn());
       setResult(r);
-      if (r.vendor !== 'unknown' && !r.error && !name) setName(r.model ?? form.host);
+      if (r.vendor !== 'unknown' && !r.error) {
+        if (!name) setName(r.model ?? form.host);
+        // the device tells us the real RTSP port (e.g. a non-default 10554) — adopt it
+        if (r.detected_rtsp_port) setForm((f) => ({ ...f, rtsp_port: String(r.detected_rtsp_port) }));
+      }
     } catch {
       toast.error(intl.formatMessage({ id: 'camera.probe.failed' }));
     } finally {
@@ -181,6 +185,16 @@ export function CameraAddWizard({ onCreated }: { onCreated: () => void }) {
         </DialogHeader>
 
         <div className="space-y-3">
+          {/* name can be filled in upfront; discovery/probe only auto-fill it when left blank */}
+          <div className="space-y-1.5">
+            <Label>{intl.formatMessage({ id: 'camera.name' })}</Label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={intl.formatMessage({ id: 'camera.name_placeholder' })}
+            />
+          </div>
+
           {/* ONVIF network auto-discovery (WS-Discovery multicast) */}
           <div className="rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-2">
@@ -243,13 +257,6 @@ export function CameraAddWizard({ onCreated }: { onCreated: () => void }) {
           </Button>
 
           {result && <ProbeResultCard result={result} />}
-
-          {probeOk && (
-            <div className="space-y-1.5">
-              <Label>{intl.formatMessage({ id: 'camera.name' })}</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-            </div>
-          )}
         </div>
 
         <DialogFooter>

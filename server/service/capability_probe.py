@@ -23,6 +23,7 @@ def probe(host, *, http_port=80, onvif_port=80, rtsp_port=554, username=None, pa
         'model': None, 'firmware': None, 'serial': None,
         'ptz_supported': False, 'audio_supported': False,
         'snapshot_url': None, 'streams': [], 'capabilities': None, 'reachable': reachable,
+        'detected_rtsp_port': None,
     }
 
     if vendor == 'unknown':
@@ -37,6 +38,12 @@ def probe(host, *, http_port=80, onvif_port=80, rtsp_port=554, username=None, pa
         caps = driver.get_capabilities()
         result['capabilities'] = caps.to_dict()
         result['streams'] = [s.to_dict() for s in caps.streams]
+        # auto-detect the RTSP port the device actually advertises (best-effort; onvif only)
+        for s in caps.streams:
+            port = getattr(s, 'rtsp_port', None)
+            if port:
+                result['detected_rtsp_port'] = port
+                break
         result['ptz_supported'] = bool(caps.ptz.get('supported'))
         result['audio_supported'] = bool(caps.audio.get('input') or caps.audio.get('output'))
         result['snapshot_url'] = caps.snapshot.get('url')

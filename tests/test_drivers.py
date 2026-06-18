@@ -194,3 +194,63 @@ def test_go2rtc_get_frame_offline_no_retry(monkeypatch):
     monkeypatch.setattr(g.requests, 'get', _boom)
     assert g.Go2rtcDriver().get_frame('cam_x', retries=3) is None
     assert calls['n'] == 1                                       # bailed after the first failure
+
+
+# ── onvif RTSP-port auto-detection (PLAN P1 §5.2) ─────────────────────────────
+class _FakeRes:
+    def __init__(self, w, h):
+        self.Width, self.Height = w, h
+
+
+class _FakeVec:
+    def __init__(self, w, h):
+        self.Encoding = 'H264'
+        self.Resolution = _FakeRes(w, h)
+        self.RateControl = type('R', (), {'FrameRateLimit': 25})()
+
+
+class _FakeProfile:
+    def __init__(self, token, w, h):
+        self.token = token
+        self.VideoEncoderConfiguration = _FakeVec(w, h)
+
+
+class _FakeMedia:
+    """Mimics the onvif media service: GetProfiles + GetStreamUri returning a non-default RTSP port."""
+    def __init__(self, port):
+        self._port = port
+
+    def GetProfiles(self):
+        return [_FakeProfile('main', 1920, 1080), _FakeProfile('sub', 640, 360)]
+
+    def GetStreamUri(self, _req):
+        uri = 'rtsp://10.0.0.5:%d/Streaming/Channels/101' % self._port
+        return type('U', (), {'Uri': uri})()
+
+
+def test_onvif_stream_profiles_detect_rtsp_port():
+    drv = OnvifDriver('10.0.0.5', onvif_port=80, username='a', password='b')
+    drv._camera = object()  # short-circuit _connect() so no real network call
+    drv._media = _FakeMedia(10554)
+    profiles = drv.get_stream_profiles()
+    assert profiles[0].rtsp_path == '/Streaming/Channels/101'
+    assert profiles[0].rtsp_port == 10554
+
+
+def test_capability_probe_surfaces_detected_rtsp_port(monkeypatch):
+    from server.driver.base import Capabilities, StreamProfile
+    from server.service import capability_probe
+
+    monkeypatch.setattr(capability_probe.factory, 'detect_vendor', lambda host, **kw: ('onvif', 'onvif'))
+
+    class _Drv:
+        def get_device_info(self):
+            return DeviceInfo('onvif', model='Cam', firmware='1.0', serial='SN1')
+
+        def get_capabilities(self):
+            return Capabilities(probe_source='onvif',
+                                streams=[StreamProfile(role='main', rtsp_path='/s1', rtsp_port=10554)])
+
+    monkeypatch.setattr(capability_probe.factory, 'build_driver', lambda *a, **kw: _Drv())
+    result = capability_probe.probe('10.0.0.5', username='a', password='b')
+    assert result['detected_rtsp_port'] == 10554

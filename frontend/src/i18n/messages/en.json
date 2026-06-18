@@ -348,6 +348,7 @@
   "discovery.none": "No cameras found. Check they're on the same subnet and the container uses host networking.",
   "discovery.failed": "Discovery failed.",
   "camera.name": "Name",
+  "camera.name_placeholder": "e.g. Front door",
   "camera.host": "IP / host",
   "camera.vendor": "Vendor",
   "camera.fisheye": "Fisheye dewarp (client)",
