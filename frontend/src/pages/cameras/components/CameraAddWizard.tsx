@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { ProbeResultCard } from '@/pages/cameras/components/ProbeResultCard';
 import { createCamera, discoverOnvif, probeCamera } from '@/pages/cameras/camera.api';
 import type { DiscoveredDevice, ProbeResult } from '@/types/axp';
@@ -235,18 +236,29 @@ export function CameraAddWizard({ onCreated }: { onCreated: () => void }) {
           <div className="grid grid-cols-2 gap-3">
             {field('host', 'camera.host')}
             {field('http_port', 'camera.http_port')}
-            {field('rtsp_port', 'camera.rtsp_port')}
             {field('username', 'camera.username')}
             {field('password', 'camera.password', 'password')}
           </div>
 
-          {/* channel only matters for multi-channel DVR/NVR devices; default 1 for direct IP cameras */}
+          {/* RTSP port defaults to 554; channel only matters for multi-channel DVR/NVR devices
+              (default 1 for direct IP cameras). Both live here so the common case stays simple —
+              the probe also auto-fills rtsp_port when the device advertises a non-default one. */}
           <details className="rounded-md border border-border px-3 py-2">
             <summary className="cursor-pointer text-xs text-muted-foreground">
               {intl.formatMessage({ id: 'camera.advanced' })}
             </summary>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              {field('channel', 'camera.channel')}
+            <div className="mt-2 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                {field('rtsp_port', 'camera.rtsp_port')}
+                {field('channel', 'camera.channel')}
+              </div>
+              <label className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                <span className="text-sm">HTTPS</span>
+                <Switch
+                  checked={form.use_https}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, use_https: v }))}
+                />
+              </label>
             </div>
           </details>
 
