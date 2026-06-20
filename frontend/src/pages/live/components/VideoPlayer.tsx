@@ -201,16 +201,20 @@ export function VideoPlayer({
       else void tryWebRTC();
     });
 
-    // stall watchdog: live video should always advance. If a path has taken over but
-    // playback freezes (MSE buffer gap, WebRTC track stall, transcode keyframe hiccup) for
-    // the stall window, tear everything down and re-init from scratch — auto-recovers cuts.
+    // stall/recovery watchdog: once a transport has been chosen, live video should keep
+    // advancing. If it doesn't within the stall window — frozen mid-stream (buffer gap,
+    // track stall, transcode hiccup) OR never started/errored because the camera was offline —
+    // tear everything down and re-init from scratch. A live tile is autoplay+muted and never
+    // intentionally paused, so a paused-and-not-advancing tile means failure: we must keep
+    // retrying (with backoff) so it auto-reconnects when a long-offline camera comes back,
+    // instead of getting stuck on the error/spinner state until a manual page reload.
     let lastT = -1;
     let lastProgress = Date.now();
     const watchdog = window.setInterval(() => {
       if (cancelled) return;
-      const live = webrtcLive || settled;     // a real path is up (not the initial connect)
+      const live = webrtcLive || settled;     // a transport has been chosen (past the gate/initial connect)
       const t = video.currentTime;
-      if (!live || video.paused) { lastProgress = Date.now(); lastT = t; return; }
+      if (!live) { lastProgress = Date.now(); lastT = t; return; }
       if (t > lastT + 0.05) {
         lastT = t;
         lastProgress = Date.now();
