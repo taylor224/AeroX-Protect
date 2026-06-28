@@ -77,6 +77,9 @@ export function CameraTile({
       onDoubleClick={!editMode ? onEnlarge : undefined}
       className={cn(
         'group relative h-full w-full overflow-hidden rounded bg-black transition-shadow',
+        // exempt the tile from react-grid-layout's drag-detection in view mode so its mousedown
+        // handling can't swallow the first click of a double-click (drag is edit-mode only)
+        !editMode && 'rgl-no-drag',
         spotlight && 'ring-2 ring-primary ring-offset-1 ring-offset-canvas',
         !editMode && onEnlarge && 'cursor-zoom-in',
       )}

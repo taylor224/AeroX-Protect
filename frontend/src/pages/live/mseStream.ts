@@ -103,9 +103,13 @@ export function connectMse(video: HTMLVideoElement, wsUrl: string, opts: MseOpts
     if (stopped || !sb || sb.updating || sb.buffered.length === 0) return;
     const start = sb.buffered.start(0);
     const end = sb.buffered.end(sb.buffered.length - 1);
-    if (video.currentTime < start || end - video.currentTime > 3) {
+    // Keep ~1s of cushion off the live edge instead of riding it at 0.5s: on a low-FPS sub
+    // stream, sitting right at the edge underruns on the slightest jitter (stutter), and each
+    // correction reseeks → a decoder keyframe resync (gray/blocky frames). Only correct on a
+    // real gap or >4s drift so we're not constantly nudging the playhead.
+    if (video.currentTime < start || end - video.currentTime > 4) {
       try {
-        video.currentTime = Math.max(start, end - 0.5);
+        video.currentTime = Math.max(start, end - 1);
       } catch {
         /* setting currentTime can throw mid-update; harmless, retry next tick */
       }

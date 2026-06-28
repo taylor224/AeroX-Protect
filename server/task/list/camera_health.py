@@ -21,15 +21,29 @@ THUMB_TTL = 120
 THUMB_WIDTH = 640        # tiles are small; scale the (possibly 4K) frame down for cache/serve
 
 
-def _thumb_stream(camera):
-    """Stream to probe for liveness + grab as the tile thumbnail. Prefer the FULL (main)
+def _probe_streams(camera):
+    """Ordered streams to try for liveness, best-thumbnail-first. Prefer the FULL (main)
     stream: the recorder keeps it continuously connected, so go2rtc serves a warm,
-    keyframe-aligned frame instantly. The live (sub) stream is on-demand and — for H.265
-    cameras — transcoded, so a cold grab catches a pre-keyframe garbage frame, which is what
-    produced the gray thumbnails. Fall back to the live stream, then the first one."""
-    return (next((s for s in camera.streams if s.is_default_full), None)
-            or next((s for s in camera.streams if s.is_default_live), None)
-            or (camera.streams[0] if camera.streams else None))
+    keyframe-aligned frame instantly and it makes the sharpest thumbnail. The live (sub)
+    stream is on-demand and — for H.265 cameras — transcoded, so a cold grab catches a
+    pre-keyframe garbage frame (the old gray thumbnails).
+
+    BUT a camera serving its live/sub feed (exactly what the Live wall plays) must be reported
+    ONLINE even when the main snapshot is briefly cold/wedged — otherwise the camera/event
+    lists show 'offline' while Live shows video. So if the main grab yields nothing we fall
+    back to the live stream (and any other), and only call the camera offline when NO stream
+    produces a frame. get_frame already retries past a sub-stream's gray pre-keyframe frame."""
+    ordered = [
+        next((s for s in camera.streams if s.is_default_full), None),
+        next((s for s in camera.streams if s.is_default_live), None),
+        camera.streams[0] if camera.streams else None,
+    ]
+    out, seen = [], set()
+    for s in ordered:
+        if s is not None and s.go2rtc_name not in seen:
+            seen.add(s.go2rtc_name)
+            out.append(s)
+    return out
 
 
 def _resync_source(camera, stream) -> None:
@@ -91,8 +105,16 @@ def run_health_pass(driver, redis=None) -> int:
         if _ensure_all_registered(camera, registered):
             resynced += 1
 
-        stream = _thumb_stream(camera)
-        frame = driver.get_frame(stream.go2rtc_name, width=THUMB_WIDTH) if stream else None
+        # probe the main stream first (warm + sharpest thumbnail); if it gives no frame, fall
+        # back to the live/sub stream the wall plays, so a streaming camera is never falsely
+        # marked offline. online == "some stream produced a real frame".
+        streams = _probe_streams(camera)
+        stream = streams[0] if streams else None
+        frame = None
+        for s in streams:
+            frame = driver.get_frame(s.go2rtc_name, width=THUMB_WIDTH)
+            if frame:
+                break
         online = bool(frame)
 
         # self-heal: a frameless camera may be reachable but go2rtc lost/wedged its source

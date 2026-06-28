@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Maximize, Minimize, Pause, Play, Tags, Trash2 } from 'lucide-react';
+import { Maximize, Minimize, Pause, Play, Tags, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { toast } from 'sonner';
@@ -292,9 +292,15 @@ export function LivePage() {
             <DialogHeader className="sr-only">
               <DialogTitle>{enlargedCamera.name}</DialogTitle>
             </DialogHeader>
-            <div className="h-full w-full overflow-hidden rounded-lg bg-black">
+            <div className="relative h-full w-full overflow-hidden rounded-lg bg-black">
+              {/* double-click the enlarged tile to shrink back, or use the explicit close button */}
               <CameraTile camera={enlargedCamera} ratioMode="fit" showName audioOn={audioOn.has(enlargedCamera.uuid)}
-                onToggleAudio={() => toggleAudio(enlargedCamera.uuid)} />
+                onToggleAudio={() => toggleAudio(enlargedCamera.uuid)}
+                onEnlarge={() => setEnlargedUuid(null)} />
+              <button onClick={() => setEnlargedUuid(null)} aria-label="close"
+                className="absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2 text-white/80 backdrop-blur transition-colors hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
             </div>
           </>
         )}
