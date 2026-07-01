@@ -28,14 +28,27 @@ def test_build_source_live_transcode_h264():
     cam.live_transcode = True
     live = _stream(path='/live')
     live.is_default_live = True
-    assert build_source(cam, live) == 'ffmpeg:rtsp://admin:p%40ss@10.0.0.5:554/live#video=h264#audio=copy'
+    assert build_source(cam, live) == 'ffmpeg:rtsp://admin:p%40ss@10.0.0.5:554/live#video=h264#audio=aac'
     # a non-default-live (e.g. main/archive) stream stays copy even with the flag on
     main = _stream(path='/main')
     main.is_default_live = False
     assert build_source(cam, main) == 'rtsp://admin:p%40ss@10.0.0.5:554/main#video=copy#audio=copy'
     # transcode also honors forced tcp transport
     cam.rtsp_transport = 'tcp'
-    assert build_source(cam, live) == 'ffmpeg:rtsp://admin:p%40ss@10.0.0.5:554/live#input=rtsp/tcp#video=h264#audio=copy'
+    assert build_source(cam, live) == 'ffmpeg:rtsp://admin:p%40ss@10.0.0.5:554/live#input=rtsp/tcp#video=h264#audio=aac'
+
+
+def test_build_source_auto_transcode_h265():
+    # an H.265 default-live stream is auto-transcoded to H.264 even without the flag —
+    # browsers can't decode HEVC over MSE/WebRTC.
+    cam = _cam([])
+    live = _stream(path='/live')
+    live.is_default_live = True
+    live.codec = 'h265'
+    assert build_source(cam, live) == 'ffmpeg:rtsp://admin:p%40ss@10.0.0.5:554/live#video=h264#audio=aac'
+    # H.264 default-live stays copy (no needless transcode)
+    live.codec = 'h264'
+    assert build_source(cam, live) == 'rtsp://admin:p%40ss@10.0.0.5:554/live#video=copy#audio=copy'
 
 
 def test_build_source_rtsp_transport():

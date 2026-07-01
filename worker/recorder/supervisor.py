@@ -12,6 +12,8 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 
+from sqlalchemy import or_
+
 import config
 from server.model import db, utcnow
 from server.model.camera import Camera
@@ -29,8 +31,10 @@ from server.service import ffmpeg, segment_indexer, storage_manager
 
 logger = logging.getLogger(__name__)
 
-BACKOFF_START = 2.0
-BACKOFF_MAX = 30.0
+# Fast first retry keeps the recording gap after a transient camera/go2rtc blip small
+# (a slow first retry is the main cause of multi-second holes), then grows to a modest cap.
+BACKOFF_START = 1.0
+BACKOFF_MAX = 15.0
 STALL_FACTOR = 3
 
 
@@ -139,13 +143,16 @@ class RecorderSupervisor:
         # Recording is schedule-driven for EVERY enabled camera (no per-camera on/off stop).
         # The P3 weekly schedule is the single authority — it defaults to 'continuous' when
         # unscheduled, so cameras record unconditionally unless a schedule window says 'off'.
-        continuous_ids = {c.id for c in Camera.get_all_enabled()}
-        forced_ids = set()   # in-progress manual/event recording overrides any schedule
-        for rec in db.session.query(Recording).filter(
-                Recording.end_ts.is_(None), Recording.deleted_at.is_(None)).all():
-            forced_ids.add(rec.camera_id)
-
         now = utcnow()
+        continuous_ids = {c.id for c in Camera.get_all_enabled()}
+        # In-progress (end_ts NULL) OR still-open event/manual windows (end_ts in the future,
+        # e.g. an event's post-buffer) force recording ON regardless of the weekly schedule —
+        # otherwise an event that fires during an 'off' window captures nothing.
+        forced_ids = set()
+        for rec in db.session.query(Recording).filter(
+                Recording.deleted_at.is_(None),
+                or_(Recording.end_ts.is_(None), Recording.end_ts > now)).all():
+            forced_ids.add(rec.camera_id)
         cams = []
         for cid in continuous_ids | forced_ids:
             cam = db.session.query(Camera).filter(Camera.id == cid, Camera.deleted_at.is_(None)).first()
@@ -181,10 +188,11 @@ class RecorderSupervisor:
 
         output_dir = os.path.join(disk.mount_path, str(cam.id))
         os.makedirs(output_dir, exist_ok=True)
-        container = (policy.container if policy else 'fmp4')
+        container = (policy.container if policy else 'mpegts')
         seg_seconds = (policy.segment_seconds if policy else 10)
         out_pattern = os.path.join(output_dir, 'seg-%Y%m%d-%H%M%S.' + ffmpeg.segment_ext(container))
-        cmd = ffmpeg.build_segment_cmd(ffmpeg.restream_url(stream.go2rtc_name), out_pattern, seg_seconds, container)
+        cmd = ffmpeg.build_segment_cmd(ffmpeg.restream_url(stream.go2rtc_name), out_pattern,
+                                       seg_seconds, container, video_codec=getattr(stream, 'codec', None))
 
         try:
             log_path = os.path.join(output_dir, 'ffmpeg.log')
@@ -231,13 +239,23 @@ class RecorderSupervisor:
         """Record the death once (backoff), then re-spawn when the gate elapses."""
         if not proc.dead_handled:
             proc.restart_count += 1
-            proc.backoff = min(proc.backoff * 1.5, BACKOFF_MAX)
+            proc.backoff = min(proc.backoff * 2, BACKOFF_MAX)
             proc.next_retry = time.monotonic() + proc.backoff
             proc.dead_handled = True
             state = STATE_ERROR if proc.restart_count > 10 else STATE_RECONNECTING
             self._set_health(cam.id, state, pid=None, restart_count=proc.restart_count, error=reason)
             logger.warning('recorder dead camera=%s reason=%s restart=%d backoff=%.1f',
                            cam.id, reason, proc.restart_count, proc.backoff)
+            # Index the partial final segment the dead ffmpeg left behind (same as _stop). The
+            # respawn may land on a different disk (least_used), which would otherwise orphan
+            # this file — it would never be indexed and only reclaimed later by retention.
+            if proc.last_disk is not None:
+                try:
+                    segment_indexer.index_camera_dir(cam.id, proc.last_disk, proc.container,
+                                                     include_newest=True)
+                except Exception:
+                    logger.exception('final index error (dead) camera=%s', cam.id)
+                    db.session.rollback()
         if time.monotonic() >= proc.next_retry:
             self._start(cam)   # re-spawn (self-gated; carries restart_count/backoff)
 
@@ -349,10 +367,11 @@ class RecorderSupervisor:
 
         output_dir = os.path.join(disk.mount_path, str(cam.id), 'sub')
         os.makedirs(output_dir, exist_ok=True)
-        container = (policy.container if policy else 'fmp4')
+        container = (policy.container if policy else 'mpegts')
         seg_seconds = (policy.segment_seconds if policy else 10)
         out_pattern = os.path.join(output_dir, 'seg-%Y%m%d-%H%M%S.' + ffmpeg.segment_ext(container))
-        cmd = ffmpeg.build_segment_cmd(ffmpeg.restream_url(stream.go2rtc_name), out_pattern, seg_seconds, container)
+        cmd = ffmpeg.build_segment_cmd(ffmpeg.restream_url(stream.go2rtc_name), out_pattern,
+                                       seg_seconds, container, video_codec=getattr(stream, 'codec', None))
 
         try:
             with open(os.path.join(output_dir, 'ffmpeg.log'), 'ab') as log_fh:
@@ -393,11 +412,18 @@ class RecorderSupervisor:
     def _on_dead_sub(self, cam: Camera, proc: Proc):
         if not proc.dead_handled:
             proc.restart_count += 1
-            proc.backoff = min(proc.backoff * 1.5, BACKOFF_MAX)
+            proc.backoff = min(proc.backoff * 2, BACKOFF_MAX)
             proc.next_retry = time.monotonic() + proc.backoff
             proc.dead_handled = True
             logger.warning('sub recorder dead camera=%s restart=%d backoff=%.1f',
                            cam.id, proc.restart_count, proc.backoff)
+            if proc.last_disk is not None:
+                try:
+                    segment_indexer.index_camera_dir(cam.id, proc.last_disk, proc.container,
+                                                     subdir='sub', stream_role='sub',
+                                                     include_newest=True)
+                except Exception:
+                    db.session.rollback()
         if time.monotonic() >= proc.next_retry:
             self._start_sub(cam)   # re-spawn (self-gated; carries restart_count/backoff)
 
@@ -432,11 +458,14 @@ class RecorderSupervisor:
     # is fully isolated — a fault here never disturbs recording.
     @staticmethod
     def _warm_stream(cam: Camera):
-        """The live stream go2rtc transcodes (default-live + live_transcode). None otherwise."""
-        if not getattr(cam, 'live_transcode', False):
+        """The live stream go2rtc transcodes (default-live that is H.265 or force-transcoded).
+        None otherwise — a copy stream cold-starts cheaply and needs no keep-warm."""
+        from server.service.go2rtc_sync import live_transcode_enabled
+        stream = next((s for s in cam.streams
+                       if getattr(s, 'is_default_live', False) and s.enabled), None)
+        if stream is None:
             return None
-        return next((s for s in cam.streams
-                     if getattr(s, 'is_default_live', False) and s.enabled), None)
+        return stream if live_transcode_enabled(cam, stream) else None
 
     def _tick_warm(self):
         warm: dict[int, Camera] = {}
@@ -491,7 +520,7 @@ class RecorderSupervisor:
     def _on_dead_warm(self, cam: Camera, proc: Proc):
         if not proc.dead_handled:
             proc.restart_count += 1
-            proc.backoff = min(proc.backoff * 1.5, BACKOFF_MAX)
+            proc.backoff = min(proc.backoff * 2, BACKOFF_MAX)
             proc.next_retry = time.monotonic() + proc.backoff
             proc.dead_handled = True
             logger.debug('keepwarm dead camera=%s restart=%d backoff=%.1f',

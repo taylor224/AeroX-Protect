@@ -22,7 +22,7 @@ class StoragePolicy(SnowflakeMixin, TimestampMixin, AuditMixin, BaseDB):
 
     camera_id = Column(BigIntId, nullable=True, index=True)   # NULL = global fallback
     segment_seconds = Column(Integer, nullable=False, default=10)
-    container = Column(String(8), nullable=False, default='fmp4')   # fmp4 / mpegts
+    container = Column(String(8), nullable=False, default='mpegts')  # mpegts / fmp4
     record_mode = Column(String(12), nullable=False, default=RECORD_OFF)  # off / continuous
     balance_strategy = Column(String(16), nullable=False, default=STRATEGY_LEAST_USED)
     pinned_disk_id = Column(BigIntId, nullable=True)

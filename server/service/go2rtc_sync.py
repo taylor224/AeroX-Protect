@@ -12,6 +12,19 @@ from server.driver.go2rtc import Go2rtcDriver, Go2rtcError
 logger = logging.getLogger(__name__)
 
 
+def live_transcode_enabled(camera, stream) -> bool:
+    """Whether go2rtc must transcode this stream to H.264 for the browser.
+
+    Only the default-live (grid) stream is ever transcoded — one shared on-demand producer
+    fans out to all viewers. We transcode when the camera source is H.265/HEVC (MSE and
+    WebRTC can't decode HEVC in Chrome/Firefox → live would fail), or when forced via the
+    per-camera `live_transcode` flag. The main/archive stream always stays copy (recorded
+    without re-encode)."""
+    if not getattr(stream, 'is_default_live', False):
+        return False
+    return getattr(camera, 'live_transcode', False) or (getattr(stream, 'codec', None) == 'h265')
+
+
 def build_source(camera, stream) -> str:
     """go2rtc source for a camera stream (copy = no re-encode).
 
@@ -34,8 +47,9 @@ def build_source(camera, stream) -> str:
     # default-live stream we transcode to H.264 via go2rtc's ffmpeg source. go2rtc runs ONE
     # such producer per stream and fans it out to every viewer — N watchers = 1 transcode,
     # and it's on-demand (no watchers → no ffmpeg). The main/archive stream stays copy.
-    if getattr(camera, 'live_transcode', False) and getattr(stream, 'is_default_live', False):
-        return 'ffmpeg:%s%s#video=h264#audio=copy' % (rtsp_url, input_pre)
+    # Audio is transcoded to AAC too — a copied PCM/G.711 track can't play over MSE.
+    if live_transcode_enabled(camera, stream):
+        return 'ffmpeg:%s%s#video=h264#audio=aac' % (rtsp_url, input_pre)
 
     if input_pre:
         return 'ffmpeg:%s%s#video=copy#audio=copy' % (rtsp_url, input_pre)

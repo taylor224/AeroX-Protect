@@ -23,6 +23,13 @@ export function segmentDataUrl(segmentId: string): string {
   return `${env.apiUrl}/playback/segments/${segmentId}/data?access_token=${encodeURIComponent(token)}`;
 }
 
+/** HLS VOD playlist for a time range (hls.js). `transcode` re-encodes H.265 → H.264 server-side. */
+export function hlsUrl(cameraUuid: string, from: number, to: number, transcode: boolean): string {
+  const token = getAccessToken() ?? '';
+  const t = transcode ? '&transcode=h264' : '';
+  return `${env.apiUrl}/playback/cameras/${cameraUuid}/index.m3u8?from=${from}&to=${to}&access_token=${encodeURIComponent(token)}${t}`;
+}
+
 export function frameUrl(cameraUuid: string, ts: number): string {
   const token = getAccessToken() ?? '';
   return `${env.apiUrl}/playback/cameras/${cameraUuid}/frame?ts=${ts}&access_token=${encodeURIComponent(token)}`;

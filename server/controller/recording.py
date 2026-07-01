@@ -69,7 +69,7 @@ class RecordingController:
         """Close a manual recording + mark its overlapping segments manual (retention)."""
         end = utcnow()
         rec.close(end)
-        for seg in Segment.get_range(rec.camera_id, rec.start_ts, end):
+        for seg in Segment.get_range(rec.camera_id, rec.start_ts, end, stream_role=None):
             seg.reason = SEG_MANUAL
             db.session.add(seg)
         db.session.commit()

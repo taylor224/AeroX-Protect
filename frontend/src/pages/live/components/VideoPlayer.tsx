@@ -20,11 +20,6 @@ type PlayerState = 'connecting' | 'webrtc' | 'ws' | 'mp4' | 'error';
 // tearing down and restarting the transcode in a loop (never stabilises). Give it real room.
 const WATCHDOG_STALL_MS = 15000;
 
-// A transient WebSocket drop (go2rtc restart/self-heal, brief network blip) should reconnect
-// the same MSE path a couple of times before downgrading — a single hiccup shouldn't strand
-// the tile on the higher-latency fMP4 fallback until the next watchdog reload.
-const MSE_MAX_RETRIES = 2;
-
 /**
  * Live engine, in order of preference (mirrors Frigate, which drives the same go2rtc engine):
  *   1. MSE/WebSocket — PRIMARY. Plain TCP through nginx straight to go2rtc: no ICE, no UDP
@@ -76,7 +71,6 @@ export function VideoPlayer({
     let cancelled = false;
     let settled = false; // a transport owns the <video> element
     let webrtcLive = false; // WebRTC delivered media — don't let the timeout tear it down
-    let mseRetries = 0;
     let pc: RTCPeerConnection | null = null;
     let wsTeardown: (() => void) | null = null;
     let webrtcTimer = 0;
@@ -106,9 +100,10 @@ export function VideoPlayer({
       void video.play().catch(() => setState('error'));
     };
 
-    // PRIMARY transport. On a transient drop, reconnect MSE a couple of times before
-    // handing off to the WebRTC/fMP4 fallbacks (see MSE_MAX_RETRIES).
-    const tryWs = async () => {
+    // PRIMARY transport. connectMse self-reconnects (10s cadence) on transient drops while
+    // keeping the decoder alive, fetching a fresh ticket each attempt; onError fires only once
+    // those are exhausted → hand off to the WebRTC/fMP4 fallbacks.
+    const tryWs = () => {
       if (cancelled || settled) return;
       if (!mseSupported()) {
         void tryWebRTC(); // old iPhone Safari has no MSE — go straight to the WebRTC fallback
@@ -118,33 +113,24 @@ export function VideoPlayer({
       closePc();
       video.srcObject = null;
       setState('connecting');
-      try {
-        const { ticket } = await getWsTicket(go2rtcName);
-        if (cancelled) return;
-        wsTeardown = connectMse(video, liveWsUrl(go2rtcName, ticket), {
+      wsTeardown = connectMse(
+        video,
+        async () => {
+          const { ticket } = await getWsTicket(go2rtcName);
+          return liveWsUrl(go2rtcName, ticket);
+        },
+        {
           onPlaying: () => {
-            if (cancelled) return;
-            mseRetries = 0; // a clean start resets the reconnect budget
-            setState('ws');
+            if (!cancelled) setState('ws');
           },
           onError: () => {
             clearWs();
             if (cancelled) return;
             settled = false;
-            if (mseRetries < MSE_MAX_RETRIES) {
-              mseRetries++;
-              window.setTimeout(() => {
-                if (!cancelled) void tryWs();
-              }, 500 * mseRetries); // brief, growing backoff
-            } else {
-              void tryWebRTC();
-            }
+            void tryWebRTC();
           },
-        });
-      } catch {
-        settled = false;
-        void tryWebRTC();
-      }
+        },
+      );
     };
 
     // FALLBACK transport. Fragile (ICE + UDP 8555), so we give it a short window and drop to
@@ -197,7 +183,7 @@ export function VideoPlayer({
     // shows during the brief wait; the watchdog stays idle until a path is actually live.
     void acquireStartSlot().then(() => {
       if (cancelled) return;
-      if (mseSupported()) void tryWs();
+      if (mseSupported()) tryWs();
       else void tryWebRTC();
     });
 
@@ -223,8 +209,9 @@ export function VideoPlayer({
       }
       if (Date.now() - lastProgress > stallLimitRef.current) {
         lastProgress = Date.now();
-        // back off: a feed that stalls right after every reload shouldn't reconnect-storm
-        stallLimitRef.current = Math.min(stallLimitRef.current * 2, 60_000);
+        // back off: a feed that stalls right after every reload shouldn't reconnect-storm.
+        // (MSE self-heals its own WS internally now, so this full rebuild is a last resort.)
+        stallLimitRef.current = Math.min(stallLimitRef.current * 2, 30_000);
         setReloadKey((k) => k + 1);          // re-runs this effect → fresh connect attempt
       }
     }, 2500);

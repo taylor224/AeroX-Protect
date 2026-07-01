@@ -114,8 +114,71 @@ def hls(camera_uuid):
     start, end = _parse_ms(request.args.get('from')), _parse_ms(request.args.get('to'))
     if not start or not end:
         return ResponseBuilder.bad_request('from/to required')
-    playlist = playback_planner.build_m3u8(camera.id, start, end, token)
+    transcode = request.args.get('transcode') == 'h264'
+    playlist = playback_planner.build_m3u8(camera.id, start, end, token, transcode=transcode)
     return Response(playlist, mimetype='application/vnd.apple.mpegurl')
+
+
+def _ensure_hls_ts(seg: Segment, src_path: str, transcode: bool) -> str | None:
+    """Return a path to an MPEG-TS rendition of `seg` for the HLS player, creating (and
+    caching) it if needed. .ts sources are served as-is; legacy fMP4 is remuxed (copy);
+    `transcode` re-encodes to H.264 so HEVC recordings play where the browser can't decode
+    it. Cached under {disk}/{camera}/hlscache/ and reused while newer than the source."""
+    if seg.container == 'mpegts' and not transcode:
+        return src_path
+    disk = Disk.get_by_id(seg.disk_id)
+    if not disk:
+        return None
+    cache_dir = os.path.join(disk.mount_path, str(seg.camera_id), 'hlscache')
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError:
+        return None
+    out = os.path.join(cache_dir, '%s%s.ts' % (seg.id, '_h264' if transcode else ''))
+    try:
+        if os.path.getsize(out) > 0 and os.path.getmtime(out) >= os.path.getmtime(src_path):
+            return out
+    except OSError:
+        pass
+    tmp = '%s.tmp.%d' % (out, os.getpid())
+    cmd = (ffmpeg.build_hls_transcode_cmd(src_path, tmp) if transcode
+           else ffmpeg.build_hls_remux_cmd(src_path, tmp))
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=60)
+        if r.returncode != 0 or not os.path.exists(tmp) or os.path.getsize(tmp) == 0:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            return None
+        os.replace(tmp, out)   # atomic — concurrent requests never read a partial file
+        return out
+    except (subprocess.SubprocessError, OSError):
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return None
+
+
+@context.route('/segments/<int:segment_id>/hls', methods=('GET',))
+def segment_hls(segment_id):
+    user, _ = _media_auth()
+    if not user:
+        return ResponseBuilder.no_permission('authentication_required')
+    seg = Segment.get_by_id(segment_id)
+    if not seg:
+        return ResponseBuilder.not_found('segment_not_found')
+    camera = Camera.get_by_id(seg.camera_id)
+    if not _media_camera(user, camera.uuid):
+        return ResponseBuilder.forbidden('playback_denied')
+    src = _segment_abs(seg)
+    if not src:
+        return ResponseBuilder.not_found('segment_unavailable')
+    ts_path = _ensure_hls_ts(seg, src, request.args.get('transcode') == 'h264')
+    if not ts_path:
+        return ResponseBuilder.not_found('segment_unavailable')
+    return send_file(ts_path, mimetype='video/mp2t', conditional=True, max_age=3600)
 
 
 @context.route('/segments/<int:segment_id>/data', methods=('GET',))

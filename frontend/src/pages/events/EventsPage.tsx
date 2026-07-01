@@ -163,19 +163,10 @@ export function EventsPage() {
     else setPlayhead(ts);
   };
 
-  // Clicking the timeline track jumps to the NEAREST recorded event clip (motion/intrusion/…),
-  // not to raw continuous recording — otherwise a click landing in a video_loss gap snapped to
-  // the post-reconnect segment instead of the event the user was aiming for. Falls back to a
-  // plain seek when there are no recorded events in range.
-  const seekOrSnap = (ts: number) => {
-    const recorded = (timelineQuery.data?.markers ?? []).filter((m) => m.recording_id);
-    if (recorded.length === 0) {
-      setPlayhead(ts);
-      return;
-    }
-    const nearest = recorded.reduce((a, b) => (Math.abs(b.ts - ts) < Math.abs(a.ts - ts) ? b : a));
-    pickById(nearest.event_id, nearest.ts);
-  };
+  // Clicking the timeline track scrubs to the exact clicked time on the continuous recording.
+  // (Jumping to a specific event is done by clicking the event marker/list, which calls
+  // pickById/selectEvent — the track itself must not hijack a plain seek.)
+  const seekTo = (ts: number) => setPlayhead(ts);
 
   const toggleType = (t: string) =>
     setTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -322,7 +313,14 @@ export function EventsPage() {
           {/* video + timeline — full width, larger */}
           <div className="space-y-3">
             <div className="relative">
-              <Player segments={segments} seekTs={playhead} onTimeUpdate={setPlayhead} />
+              <Player
+                cameraUuid={selectedUuid}
+                from={from}
+                to={to}
+                segments={segments}
+                seekTs={playhead}
+                onTimeUpdate={setPlayhead}
+              />
               {selected && overlayQuery.data && <MotionOverlay shapes={overlayQuery.data.shapes} />}
             </div>
             <Card className="bg-canvas p-3">
@@ -334,7 +332,7 @@ export function EventsPage() {
                 bookmarks={bookmarks}
                 playhead={playhead ?? from}
                 selectedId={selected?.id}
-                onSeek={seekOrSnap}
+                onSeek={seekTo}
                 onPickEvent={pickById}
               />
             </Card>

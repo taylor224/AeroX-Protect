@@ -46,11 +46,19 @@ class Segment(SnowflakeMixin, BaseDB):
             cls.camera_id == camera_id, cls.rel_path == rel_path).first() is not None
 
     @classmethod
-    def get_range(cls, camera_id: int, start: datetime, end: datetime) -> list[Self]:
-        """Segments overlapping [start, end], ordered by start_ts (timeline/playback)."""
-        return db.session.query(cls).filter(
+    def get_range(cls, camera_id: int, start: datetime, end: datetime,
+                  stream_role: str | None = 'main') -> list[Self]:
+        """Segments overlapping [start, end], ordered by start_ts (timeline/playback).
+
+        Defaults to the main stream only: when dual-recording (P6 R4) is on, the sub stream
+        is indexed under the same camera and would otherwise interleave into the playlist
+        (duplicate/jumping playback). Pass stream_role=None to include every role."""
+        q = db.session.query(cls).filter(
             cls.camera_id == camera_id, cls.corrupt.is_(False),
-            cls.start_ts < end, cls.end_ts > start).order_by(cls.start_ts.asc()).all()
+            cls.start_ts < end, cls.end_ts > start)
+        if stream_role is not None:
+            q = q.filter(cls.stream_role == stream_role)
+        return q.order_by(cls.start_ts.asc()).all()
 
     @classmethod
     def get_at(cls, camera_id: int, ts: datetime) -> Self | None:

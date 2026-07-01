@@ -96,7 +96,14 @@ export function ObjectSearch({ cameraUuid, cameraId }: { cameraUuid: string; cam
 
       {selected && (
         <div className="relative mx-auto max-w-3xl">
-          <Player segments={segments} seekTs={playhead} onTimeUpdate={setPlayhead} />
+          <Player
+            cameraUuid={cameraUuid}
+            from={selected.start_ts}
+            to={selected.end_ts}
+            segments={segments}
+            seekTs={playhead}
+            onTimeUpdate={setPlayhead}
+          />
           {overlayQuery.data && <DetectionOverlay tracks={overlayQuery.data.tracks} playhead={playhead ?? from} />}
         </div>
       )}

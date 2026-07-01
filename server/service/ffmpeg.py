@@ -32,27 +32,64 @@ def _hwaccel_prefix() -> list[str]:
 
 # ── recording: rolling copy-codec segments ───────────────────────────────────
 def build_segment_cmd(input_url: str, out_pattern: str, segment_seconds: int = 10,
-                      container: str = 'fmp4') -> list[str]:
+                      container: str = 'mpegts', video_codec: str | None = None) -> list[str]:
+    """Rolling segment recorder (stream copy). Input is the go2rtc RESTREAM, which already
+    emits clean, normalized timestamps — so we must NOT rewrite them with
+    `-use_wallclock_as_timestamps`/`+genpts` (that jitters copy-muxed PTS and produces
+    choppy, hard-to-seek recordings). This mirrors Frigate's `preset-rtsp-restream` (pure
+    copy) rather than its direct-camera preset. Boundaries come from `-segment_time` + the
+    camera's own keyframes; `-segment_atclocktime` is deliberately dropped (with `-c copy`
+    it only forces the *decision* point, splits still wait for a keyframe, and combined with
+    rewritten PTS it produced erratic/empty segments)."""
     cmd = [
         config.FFMPEG_BIN, '-hide_banner', '-loglevel', 'warning',
-        '-rtsp_transport', 'tcp', '-timeout', '5000000',  # rtsp socket I/O timeout (µs)
-        '-use_wallclock_as_timestamps', '1', '-fflags', '+genpts',
+        '-rtsp_transport', 'tcp', '-timeout', '10000000',  # rtsp socket I/O timeout (10s, µs)
         '-i', input_url,
         '-map', '0:v:0', '-map', '0:a?',
     ]
     if container == 'mpegts':
-        cmd += ['-c', 'copy', '-segment_format', 'mpegts']
+        # MPEG-TS is the native HLS segment container: no moov/faststart fragility, resilient
+        # to a truncated tail (crash/restart), clean concat, and it carries H.264/H.265 as-is
+        # (no hvc1 tagging needed). Audio → AAC so PCM/G.711 cameras still record.
+        cmd += ['-c:v', 'copy', '-c:a', 'aac', '-segment_format', 'mpegts']
     else:
-        # MP4 can't carry PCM/G.711 audio (pcm_mulaw/pcm_alaw) — copying it makes ffmpeg fail
-        # to write the header and the whole recording dies. Transcode audio to AAC (cheap) so
-        # any camera records; video stays passthrough (no re-encode).
-        cmd += ['-c:v', 'copy', '-c:a', 'aac',
+        # Fragmented MP4. MP4 can't carry PCM/G.711 audio (copying it fails the header and the
+        # whole recording dies) → transcode audio to AAC (cheap); video stays passthrough.
+        # HEVC in MP4 MUST be tagged `hvc1` or Safari/QuickTime/browsers show a black clip.
+        cmd += ['-c:v', 'copy']
+        if video_codec == 'h265':
+            cmd += ['-tag:v', 'hvc1']
+        cmd += ['-c:a', 'aac',
                 '-segment_format', 'mp4',
                 '-segment_format_options', 'movflags=+frag_keyframe+empty_moov+default_base_moof']
     cmd += ['-f', 'segment', '-segment_time', str(segment_seconds),
-            '-segment_atclocktime', '1', '-reset_timestamps', '1', '-strftime', '1']
+            '-reset_timestamps', '1', '-strftime', '1']
     cmd.append(out_pattern)
     return cmd
+
+
+# ── playback: on-demand HLS segment (MPEG-TS) ─────────────────────────────────
+# The recorded-playback player is hls.js over a VOD playlist whose media segments are all
+# MPEG-TS. .ts segments are served straight from disk; anything else is normalized here.
+def build_hls_remux_cmd(src_path: str, out_path: str) -> list[str]:
+    """Remux a recorded segment to MPEG-TS (stream copy) — used for legacy fMP4 segments so
+    they play in the same hls.js playlist. Cheap: demux/remux only, no re-encode."""
+    return [
+        config.FFMPEG_BIN, '-hide_banner', '-loglevel', 'error',
+        '-i', src_path, '-map', '0:v:0', '-map', '0:a?',
+        '-c', 'copy', '-f', 'mpegts', '-y', out_path,
+    ]
+
+
+def build_hls_transcode_cmd(src_path: str, out_path: str) -> list[str]:
+    """Transcode a recorded segment to H.264/AAC MPEG-TS so H.265 recordings play in browsers
+    that can't decode HEVC (Chrome/Firefox). Decode may use the configured hwaccel."""
+    return [
+        config.FFMPEG_BIN, '-hide_banner', '-loglevel', 'error', *_hwaccel_prefix(),
+        '-i', src_path, '-map', '0:v:0', '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-f', 'mpegts', '-y', out_path,
+    ]
 
 
 def build_keepwarm_cmd(input_url: str) -> list[str]:
