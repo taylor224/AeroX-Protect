@@ -5,7 +5,7 @@ import { hlsUrl } from '@/pages/playback/playback.api';
 import type { Segment } from '@/types/p2';
 
 /**
- * Continuous recorded-playback via hls.js over a VOD playlist (mirrors Frigate). The whole
+ * Continuous recorded-playback via hls.js over a VOD playlist. The whole
  * requested range plays as ONE MSE-backed stream, so there is no per-segment reload/stall and
  * seeking works across segment boundaries and gaps. H.265 recordings are transcoded to H.264
  * server-side for browsers that can't decode HEVC.

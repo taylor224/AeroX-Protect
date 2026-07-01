@@ -36,8 +36,8 @@ def build_segment_cmd(input_url: str, out_pattern: str, segment_seconds: int = 1
     """Rolling segment recorder (stream copy). Input is the go2rtc RESTREAM, which already
     emits clean, normalized timestamps — so we must NOT rewrite them with
     `-use_wallclock_as_timestamps`/`+genpts` (that jitters copy-muxed PTS and produces
-    choppy, hard-to-seek recordings). This mirrors Frigate's `preset-rtsp-restream` (pure
-    copy) rather than its direct-camera preset. Boundaries come from `-segment_time` + the
+    choppy, hard-to-seek recordings). It stays a pure copy (no re-encode) rather than the
+    wallclock-based preset a direct-camera pull would need. Boundaries come from `-segment_time` + the
     camera's own keyframes; `-segment_atclocktime` is deliberately dropped (with `-c copy`
     it only forces the *decision* point, splits still wait for a keyframe, and combined with
     rewritten PTS it produced erratic/empty segments)."""

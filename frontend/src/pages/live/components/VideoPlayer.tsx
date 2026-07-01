@@ -21,7 +21,7 @@ type PlayerState = 'connecting' | 'webrtc' | 'ws' | 'mp4' | 'error';
 const WATCHDOG_STALL_MS = 15000;
 
 /**
- * Live engine, in order of preference (mirrors Frigate, which drives the same go2rtc engine):
+ * Live engine, in order of preference (all paths drive the same go2rtc engine):
  *   1. MSE/WebSocket — PRIMARY. Plain TCP through nginx straight to go2rtc: no ICE, no UDP
  *                      port-forwarding, no candidate juggling, and it doesn't drop frames.
  *                      Works on the LAN and from remote networks (TURN-free).

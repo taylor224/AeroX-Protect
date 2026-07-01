@@ -4,8 +4,8 @@
  * A camera-wall page mounts N tiles at once; without throttling they'd all open their go2rtc
  * connection (and trigger N H.265→H.264 transcode cold-starts) in the same instant — the spike
  * that made the dashboard time out, fall back, and watchdog-storm. This grants a start slot at
- * most every STAGGER_MS so connections begin a beat apart (tiles pop in progressively, like
- * Frigate). It also spreads out the thundering-herd reconnect after a go2rtc restart.
+ * most every STAGGER_MS so connections begin a beat apart (tiles pop in progressively). It
+ * also spreads out the thundering-herd reconnect after a go2rtc restart.
  *
  * It throttles the *rate* of new connects, not the *number* of concurrent streams — a wall is
  * meant to show every tile, so there is nothing to release and no risk of deadlock. Once the

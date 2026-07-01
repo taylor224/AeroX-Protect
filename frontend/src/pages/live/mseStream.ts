@@ -9,8 +9,8 @@
  *
  * On a transient drop (go2rtc self-heal/restart, brief network blip) the WebSocket is
  * reconnected in-place at a 10s cadence WITHOUT tearing down the MediaSource/decoder — the
- * SourceBuffer is re-initialised by go2rtc's fresh init segment. This mirrors Frigate and
- * avoids the multi-second black "cut out" (and transcode cold-start) a full rebuild causes.
+ * SourceBuffer is re-initialised by go2rtc's fresh init segment. This avoids the
+ * multi-second black "cut out" (and transcode cold-start) a full rebuild causes.
  */
 
 // Candidate MSE codecs, most-capable first. We send the subset the browser actually supports;
@@ -37,7 +37,7 @@ interface MseOpts {
 }
 
 // Never reconnect faster than this — a flaky link must not storm go2rtc (each reconnect is a
-// new ticket + nginx auth_request + go2rtc consumer). Frigate uses the same 10s floor.
+// new ticket + nginx auth_request + go2rtc consumer). A 10s floor keeps reconnects tame.
 const RECONNECT_CADENCE_MS = 10_000;
 const MAX_RECONNECTS = 6; // ~1min of retries before giving up to the WebRTC/fMP4 fallback
 
