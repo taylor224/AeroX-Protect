@@ -31,15 +31,29 @@ export function mseSupported(): boolean {
   return supportedCodecs() !== '';
 }
 
+/** True if MSE can decode H.265/HEVC here (Safari, or Chrome with a hardware decoder).
+ *  Gates picking a non-transcoded H.265 stream (e.g. an HD main stream) for live view. */
+export function hevcMseSupported(): boolean {
+  if (typeof MediaSource === 'undefined' || typeof MediaSource.isTypeSupported !== 'function') return false;
+  return (
+    MediaSource.isTypeSupported('video/mp4; codecs="hvc1.1.6.L153.B0"') ||
+    MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L153.B0"')
+  );
+}
+
 interface MseOpts {
   onPlaying?: () => void;
   onError?: () => void;
 }
 
-// Never reconnect faster than this — a flaky link must not storm go2rtc (each reconnect is a
-// new ticket + nginx auth_request + go2rtc consumer). A 10s floor keeps reconnects tame.
-const RECONNECT_CADENCE_MS = 10_000;
-const MAX_RECONNECTS = 6; // ~1min of retries before giving up to the WebRTC/fMP4 fallback
+// Reconnect fast at first, then back off. A page refresh (or go2rtc restart) races the new
+// consumer against the old producer's teardown, so the FIRST attempt often fails and clears
+// within a second — a flat 10s cadence turned that into 10+ seconds of black tile. Early
+// retries are cheap (a ticket + auth_request + go2rtc consumer), so start at 1s and grow to
+// a tame 10s steady-state so a genuinely flaky link still can't storm go2rtc.
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
+const RECONNECT_CADENCE_MS = 10_000; // steady-state cap after the quick early retries
+const MAX_RECONNECTS = 8; // ~55s of retries before giving up to the WebRTC/fMP4 fallback
 
 /**
  * Start an MSE/WebSocket stream into `video`. `getUrl` returns a fresh WS URL (with a fresh,
@@ -158,7 +172,8 @@ export function connectMse(video: HTMLVideoElement, getUrl: () => Promise<string
       return;
     }
     reconnects++;
-    const wait = Math.max(0, RECONNECT_CADENCE_MS - (Date.now() - lastConnectAt));
+    const delay = RECONNECT_DELAYS_MS[reconnects - 1] ?? RECONNECT_CADENCE_MS;
+    const wait = Math.max(0, delay - (Date.now() - lastConnectAt));
     window.clearTimeout(reconnectTimer);
     reconnectTimer = window.setTimeout(() => {
       if (!stopped) void openWs();

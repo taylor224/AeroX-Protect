@@ -30,6 +30,9 @@ def _validate_page(page: dict) -> None:
         rm = cell.get('ratio_mode')
         if rm is not None and rm not in RATIO_MODES:
             raise InvalidParameterException('invalid ratio_mode: %s' % rm)
+        sr = cell.get('stream_role')        # per-cell live quality: main = HD, sub = default
+        if sr is not None and sr not in ('main', 'sub'):
+            raise InvalidParameterException('invalid stream_role: %s' % sr)
         cam_uuid = cell.get('camera_uuid')
         if cam_uuid:
             try:

@@ -20,7 +20,6 @@ import {
   saveDashboard,
 } from '@/pages/dashboards/dashboard.api';
 import { listEvents } from '@/pages/events/events.api';
-import { CameraTile } from '@/pages/live/components/CameraTile';
 import { LiveGrid } from '@/pages/live/components/LiveGrid';
 import { LAYOUT_PRESETS, presetLayout } from '@/pages/live/layouts';
 import type { DashboardLayout, RatioMode } from '@/types/axp';
@@ -41,7 +40,10 @@ export function LivePage() {
   const [dirty, setDirty] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [pickerCell, setPickerCell] = useState<string | null>(null);
-  const [enlargedUuid, setEnlargedUuid] = useState<string | null>(null); // double-click → big view
+  // double-click → big view. Holds the CELL id; the tile's already-playing media is reparented
+  // into the overlay host below (same <video>, no reconnect/reload).
+  const [enlargedId, setEnlargedId] = useState<string | null>(null);
+  const [overlayHost, setOverlayHost] = useState<HTMLDivElement | null>(null);
   const [audioOn, setAudioOn] = useState<Set<string>>(new Set()); // session-only "listen" set
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activePage, setActivePage] = useState(0);
@@ -124,14 +126,21 @@ export function LivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardsQuery.data]);
 
-  // per-dashboard sequence: auto-rotate among this dashboard's pages (paused while editing)
+  // per-dashboard sequence: auto-rotate among this dashboard's pages (paused while editing
+  // or while a tile is enlarged — rotating away would unmount the enlarged stream)
   useEffect(() => {
-    if (!seq.enabled || editMode || pages.length < 2) return;
+    if (!seq.enabled || editMode || pages.length < 2 || enlargedId) return;
     const t = setTimeout(() => {
       setActivePage((i) => (i + 1) % pages.length);
     }, Math.max(2, seq.dwell_s) * 1000);
     return () => clearTimeout(t);
-  }, [seq.enabled, seq.dwell_s, editMode, pages.length, pageIdx]);
+  }, [seq.enabled, seq.dwell_s, editMode, pages.length, pageIdx, enlargedId]);
+
+  // enlarged tile lives inside the current page's grid — close it when the page changes or
+  // edit mode starts (its cell may unmount / drag must not fight the overlay)
+  useEffect(() => {
+    setEnlargedId(null);
+  }, [pageIdx, editMode]);
 
   // fullscreen (kiosk): real Fullscreen API + ESC to exit; sync state on fullscreenchange
   const enterFullscreen = () => {
@@ -147,7 +156,9 @@ export function LivePage() {
       if (!document.fullscreenElement) setFullscreen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && fullscreen) exitFullscreen();
+      if (e.key !== 'Escape') return;
+      if (enlargedId) setEnlargedId(null);
+      else if (fullscreen) exitFullscreen();
     };
     document.addEventListener('fullscreenchange', onFsChange);
     window.addEventListener('keydown', onKey);
@@ -155,7 +166,7 @@ export function LivePage() {
       document.removeEventListener('fullscreenchange', onFsChange);
       window.removeEventListener('keydown', onKey);
     };
-  }, [fullscreen, exitFullscreen]);
+  }, [fullscreen, exitFullscreen, enlargedId]);
 
   const applyPreset = (key: string) => {
     const existing = (page.cells ?? []).map((c) => c.camera_uuid);
@@ -240,6 +251,11 @@ export function LivePage() {
     }
   };
 
+  const toggleEnlarge = useCallback(
+    (cellId: string) => setEnlargedId((cur) => (cur === cellId ? null : cellId)),
+    [],
+  );
+
   const grid = (
     <LiveGrid
       layout={page}
@@ -248,10 +264,12 @@ export function LivePage() {
       showNames={showNames}
       spotlightUuids={spotlightUuids}
       audioOn={audioOn}
+      enlargedCellId={enlargedId}
+      enlargedHost={overlayHost}
       onToggleAudio={toggleAudio}
       onChange={editPage}
       onAssignCell={setPickerCell}
-      onEnlarge={setEnlargedUuid}
+      onEnlarge={toggleEnlarge}
     />
   );
 
@@ -283,29 +301,24 @@ export function LivePage() {
     </div>
   );
 
-  const enlargedCamera = enlargedUuid ? cameraMap.get(enlargedUuid) : undefined;
+  // Enlarge overlay: an always-mounted host div. The enlarged tile's ALREADY-PLAYING media is
+  // reparented into it by CameraTile (same <video>, no reconnect — enlarging is instant).
+  // Double-click the enlarged view (tile handler) or the close button / ESC to shrink back.
   const enlargeOverlay = (
-    <Dialog open={!!enlargedCamera} onOpenChange={(o) => !o && setEnlargedUuid(null)}>
-      <DialogContent className="h-[94vh] w-[97vw] max-w-none border-0 bg-transparent p-0 shadow-none">
-        {enlargedCamera && (
-          <>
-            <DialogHeader className="sr-only">
-              <DialogTitle>{enlargedCamera.name}</DialogTitle>
-            </DialogHeader>
-            <div className="relative h-full w-full overflow-hidden rounded-lg bg-black">
-              {/* double-click the enlarged tile to shrink back, or use the explicit close button */}
-              <CameraTile camera={enlargedCamera} ratioMode="fit" showName audioOn={audioOn.has(enlargedCamera.uuid)}
-                onToggleAudio={() => toggleAudio(enlargedCamera.uuid)}
-                onEnlarge={() => setEnlargedUuid(null)} />
-              <button onClick={() => setEnlargedUuid(null)} aria-label="close"
-                className="absolute right-3 top-3 z-10 rounded-full bg-black/60 p-2 text-white/80 backdrop-blur transition-colors hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
+    <div
+      className={cn(
+        'fixed inset-0 z-[70] bg-black/90 p-2 transition-opacity',
+        !enlargedId && 'pointer-events-none opacity-0',
+      )}
+    >
+      <div ref={setOverlayHost} className="h-full w-full overflow-hidden rounded-lg bg-black" />
+      {enlargedId && (
+        <button onClick={() => setEnlargedId(null)} aria-label="close"
+          className="absolute right-4 top-4 z-10 rounded-full bg-black/60 p-2 text-white/80 backdrop-blur transition-colors hover:text-white">
+          <X className="h-5 w-5" />
+        </button>
+      )}
+    </div>
   );
 
   // ── kiosk / fullscreen: just the wall, ESC to exit ─────────────────────────

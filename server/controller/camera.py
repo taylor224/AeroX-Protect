@@ -158,7 +158,10 @@ class CameraController:
         db.session.add(camera)
         db.session.commit()
 
-        if data.get('streams') is not None:
+        # Only replace when the payload actually carries streams — an edit form that submits
+        # `streams: []` must not wipe the camera's streams (that left cameras streamless, and
+        # every live tile then 404-spammed /live/ws-ticket with a synthetic stream name).
+        if data.get('streams'):
             cls._replace_streams(camera, data['streams'])
 
         go2rtc_sync.remove_camera(camera)

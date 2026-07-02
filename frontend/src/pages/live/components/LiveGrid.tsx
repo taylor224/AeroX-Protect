@@ -22,6 +22,8 @@ export function LiveGrid({
   showNames = false,
   spotlightUuids,
   audioOn,
+  enlargedCellId,
+  enlargedHost,
   onToggleAudio,
   onChange,
   onAssignCell,
@@ -33,10 +35,13 @@ export function LiveGrid({
   showNames?: boolean;
   spotlightUuids?: Set<string>;
   audioOn?: Set<string>;
+  /** cell whose already-playing media is reparented into `enlargedHost` (no reconnect) */
+  enlargedCellId?: string | null;
+  enlargedHost?: HTMLElement | null;
   onToggleAudio?: (cameraUuid: string) => void;
   onChange?: (layout: DashboardLayout) => void;
   onAssignCell?: (cellId: string) => void;
-  onEnlarge?: (cameraUuid: string) => void;
+  onEnlarge?: (cellId: string) => void;
 }) {
   const cols = layout.grid?.cols ?? 12;
   const rows = Math.max(1, layout.grid?.rows ?? 8);
@@ -97,8 +102,17 @@ export function LiveGrid({
               showName={showNames}
               spotlight={!!cell.camera_uuid && !!spotlightUuids?.has(cell.camera_uuid)}
               audioOn={!!cell.camera_uuid && !!audioOn?.has(cell.camera_uuid)}
+              streamRole={cell.stream_role}
+              enlarged={cell.i === enlargedCellId}
+              enlargedHost={enlargedHost}
+              onSetStreamRole={(role) =>
+                onChange?.({
+                  ...layout,
+                  cells: cells.map((c) => (c.i === cell.i ? { ...c, stream_role: role } : c)),
+                })
+              }
               onToggleAudio={() => cell.camera_uuid && onToggleAudio?.(cell.camera_uuid)}
-              onEnlarge={() => cell.camera_uuid && onEnlarge?.(cell.camera_uuid)}
+              onEnlarge={() => cell.camera_uuid && onEnlarge?.(cell.i)}
               onRemove={() =>
                 onChange?.({
                   ...layout,

@@ -44,6 +44,20 @@ def test_layout_validation_rejects_duplicate_cell_ids(client):
     assert bad.status_code == 400
 
 
+def test_layout_stream_role_validation(client):
+    h = login(client)
+    uuid = _create_dashboard(client, h).json['data']['uuid']
+    good = client.post(f'/api/v1/dashboards/{uuid}', headers=h, json={
+        'layout': {'grid': {'cols': 12, 'rows': 8},
+                   'cells': [{'i': 'c1', 'x': 0, 'y': 0, 'w': 6, 'h': 4, 'stream_role': 'main'}]}})
+    assert good.status_code == 200
+    assert good.json['data']['layout']['cells'][0]['stream_role'] == 'main'
+    bad = client.post(f'/api/v1/dashboards/{uuid}', headers=h, json={
+        'layout': {'grid': {'cols': 12, 'rows': 8},
+                   'cells': [{'i': 'c1', 'x': 0, 'y': 0, 'w': 6, 'h': 4, 'stream_role': 'third'}]}})
+    assert bad.status_code == 400
+
+
 def test_layout_validation_rejects_unknown_camera(client):
     h = login(client)
     uuid = _create_dashboard(client, h).json['data']['uuid']
