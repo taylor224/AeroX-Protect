@@ -48,36 +48,26 @@ def test_sms_skips_without_recipient():
     assert sms.send_event_to('', {})['status'] == 'skipped'
 
 
-def test_sms_subscription_and_router_dispatch(client, monkeypatch):
+def test_sms_action_respects_flag(client, monkeypatch):
+    """Flow `sms` action node path (action_runner) honors the sms_notifications flag."""
     from server.driver import sms
-    from server.service import notification_router
+    from server.service import action_runner
+    from server.service.trigger_router import TriggerEvent
     _twilio_on(monkeypatch)
     monkeypatch.setattr(sms.requests, 'post', lambda *a, **k: _Resp(status=201))
 
     h = login(client)
-    cr = client.post('/api/v1/notification-subscriptions', headers=h, json={
-        'channel': 'sms', 'sms_to': '+15551234567', 'event_types': ['motion'], 'min_priority': 'normal'})
-    assert cr.status_code == 200, cr.json
-    assert cr.json['data']['sms_to'] == '+15551234567' and cr.json['data']['channel'] == 'sms'
+    trig = TriggerEvent(trigger_type='event', type='motion', camera_id=1, ts=1700000000000)
+    action = {'type': 'sms', 'params': {'to': '+15551234567'}}
 
-    counts = notification_router.route_event(
-        {'id': '1', 'type': 'motion', 'camera_id': '1', 'ts': 1700000000000})
-    assert counts['sms'] >= 1
+    client.put('/api/v1/feature-flags/sms_notifications', headers=h, json={'enabled': True})
+    from server.service import feature_flag
+    feature_flag.invalidate()
+    assert action_runner.run(action, trig)['status'] == 'success'
 
-
-def test_sms_dispatch_respects_flag(client, monkeypatch):
-    from server.driver import sms
-    from server.service import notification_router
-    _twilio_on(monkeypatch)
-    monkeypatch.setattr(sms.requests, 'post', lambda *a, **k: _Resp())
-
-    h = login(client)
-    client.post('/api/v1/notification-subscriptions', headers=h, json={
-        'channel': 'sms', 'sms_to': '+15551234567', 'event_types': ['motion']})
     client.put('/api/v1/feature-flags/sms_notifications', headers=h, json={'enabled': False})
-    counts = notification_router.route_event(
-        {'id': '2', 'type': 'motion', 'camera_id': '1', 'ts': 1700000000000})
-    assert counts['sms'] == 0     # flag off → no SMS
+    feature_flag.invalidate()
+    assert action_runner.run(action, trig)['status'] == 'skipped'   # flag off → no SMS
 
 
 # ── DB-stored Twilio config (admin UI) ───────────────────────────────────────

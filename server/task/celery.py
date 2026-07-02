@@ -1,4 +1,5 @@
 import functools
+import threading
 
 import sentry_sdk
 from celery import Celery, signals
@@ -54,26 +55,42 @@ def init_sentry(**_kwargs):
     )
 
 
+_db_init_lock = threading.Lock()
+
+
+def _ensure_db():
+    """Create the engine/scoped_session once per process (NullPool — no cross-fork
+    connection reuse; the pidguard covers forked children). Re-running db_init per
+    task would swap the scoped_session out from under other threads mid-transaction."""
+    if db.session is not None and getattr(db, 'conn_string', None) == config.DATABASE_URI:
+        return
+    with _db_init_lock:
+        if db.session is not None and getattr(db, 'conn_string', None) == config.DATABASE_URI:
+            return
+        db.db_init(config.DATABASE_URI, BaseDB, engine_options={
+            'pool_size': 0,
+            'pool_recycle': 0,
+            'pool_timeout': 0,
+            'pool_pre_ping': True,
+            'poolclass': NullPool,
+        })
+
+
 def celery_use_db():
-    """Per-task DB session lifecycle (NullPool — no cross-fork connection reuse)."""
+    """Per-task DB session lifecycle. Cleans up ONLY this thread's session — the subs
+    worker runs a 50-thread pool, so close_all() here would yank sessions out of other
+    tasks mid-commit (IllegalStateChangeError storms on container restart)."""
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            db.db_init(config.DATABASE_URI, BaseDB, engine_options={
-                'pool_size': 0,
-                'pool_recycle': 0,
-                'pool_timeout': 0,
-                'pool_pre_ping': True,
-                'poolclass': NullPool,
-            })
+            _ensure_db()
             try:
                 return func(*args, **kwargs)
             except PendingRollbackError:
                 db.session.rollback()
-                db.session.close_all()
             except OperationalError:
-                db.session.close_all()
+                pass
             finally:
-                db.session.close_all()
+                db.session.remove()
         return wrapper
     return decorator

@@ -1,23 +1,9 @@
-"""Action orchestration (PLAN P5 §5.4). Resolve each action's target + driver, run it with a
-timeout, collect a uniform result dict. Drivers are imported lazily (heavy/optional deps)."""
+"""Action execution (PLAN P5 §5.4) — used by flow action nodes. Resolve each action's
+target + driver, run it, return a uniform result dict. Drivers are imported lazily
+(heavy/optional deps)."""
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def run_all(rule, trig) -> list[dict]:
-    results = []
-    for a in (rule.actions or []):
-        try:
-            res = run(a, trig)
-        except Exception as exc:                       # noqa: BLE001 — record, keep going
-            logger.exception('action failed')
-            res = {'status': 'failed', 'error': str(exc)[:200]}
-        res = {**res, 'target_id': a.get('target_id'), 'type': a.get('type')}
-        results.append(res)
-        if res.get('status') != 'success' and not a.get('continue_on_error', True):
-            break
-    return results
 
 
 def run(action: dict, trig) -> dict:

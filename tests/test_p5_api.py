@@ -1,5 +1,6 @@
-"""P5 HTTP surface: rule CRUD/trigger, action-target + webhook, monitor pairing flow,
-notifications/subscriptions, web-push, api-token → external API scope."""
+"""P5 HTTP surface: action-target + webhook, monitor pairing flow, web-push,
+api-token → external API scope. (Rule + subscription APIs were retired — automation
+lives in /flows, covered by tests/test_flows.py.)"""
 from server.driver import webhook as webhook_drv
 from tests.conftest import create_user, login
 
@@ -16,42 +17,6 @@ def _dashboard():
     admin = db.session.query(User).filter(User.login_id == 'admin').first()
     return Dashboard.create(name='Lobby', layout={'grid': {'cols': 12, 'rows': 8}, 'cells': [], 'ratio_mode': 'fit'},
                             owner_id=admin.id)
-
-
-# ── rules ────────────────────────────────────────────────────────────────────
-def test_rule_crud_and_test(client):
-    h = login(client)
-    cr = client.post('/api/v1/rules', headers=h, json={
-        'name': 'motion-rule', 'trigger_type': 'event', 'trigger': {'event_types': ['motion']},
-        'condition': {}, 'actions': []})
-    assert cr.status_code == 200, cr.json
-    uuid = cr.json['data']['uuid']
-    assert client.get('/api/v1/rules', headers=h).json['data']['count'] >= 1
-    up = client.put(f'/api/v1/rules/{uuid}', headers=h, json={'name': 'renamed', 'trigger_type': 'event'})
-    assert up.json['data']['name'] == 'renamed'
-    test = client.post(f'/api/v1/rules/{uuid}/test', headers=h, json={})
-    assert test.status_code == 200 and 'matched' in test.json['data']
-    assert client.delete(f'/api/v1/rules/{uuid}', headers=h).status_code == 200
-
-
-def test_rule_rejects_bad_trigger_type(client):
-    h = login(client)
-    r = client.post('/api/v1/rules', headers=h, json={'name': 'x', 'trigger_type': 'bogus'})
-    assert r.status_code == 400
-
-
-def test_rule_manual_trigger_webhook(client, monkeypatch):
-    monkeypatch.setattr(webhook_drv.requests, 'post', lambda url, **kw: FakeResp(200))
-    h = login(client)
-    wh = client.post('/api/v1/webhooks', headers=h, json={'name': 'hk', 'url': 'http://10.0.0.2/h', 'secret': 's'})
-    hook_id = wh.json['data']['id']
-    rule = client.post('/api/v1/rules', headers=h, json={
-        'name': 'manual-hook', 'trigger_type': 'manual', 'trigger': {},
-        'actions': [{'type': 'webhook', 'target_id': int(hook_id)}]})
-    uuid = rule.json['data']['uuid']
-    fired = client.post(f'/api/v1/rules/{uuid}/trigger', headers=h, json={})
-    assert fired.status_code == 200 and fired.json['data']['status'] == 'success'
-    assert client.get(f'/api/v1/rules/{uuid}/executions', headers=h).json['data']['count'] == 1
 
 
 # ── action targets / webhooks ────────────────────────────────────────────────
@@ -118,16 +83,18 @@ def test_pairing_bad_code(client):
     assert client.post('/api/v1/pairing/claim', json={'code': '000000'}).status_code == 400
 
 
-# ── notifications ────────────────────────────────────────────────────────────
-def test_notification_subscriptions(client):
+# ── web push ─────────────────────────────────────────────────────────────────
+def test_push_vapid_and_subscribe(client):
     h = login(client)
-    cr = client.post('/api/v1/notification-subscriptions', headers=h, json={
-        'channel': 'push', 'event_types': ['motion', 'intrusion'], 'min_priority': 'high'})
-    assert cr.status_code == 200
-    sid = cr.json['data']['id']
-    assert any(s['id'] == sid for s in client.get('/api/v1/notification-subscriptions', headers=h).json['data']['items'])
-    assert client.delete(f'/api/v1/notification-subscriptions/{sid}', headers=h).status_code == 200
     assert client.get('/api/v1/push/vapid-public-key', headers=h).status_code == 200
+    sub = client.post('/api/v1/push/subscriptions', headers=h, json={
+        'endpoint': 'https://push.example.com/ep1', 'keys': {'p256dh': 'k', 'auth': 'a'}})
+    assert sub.status_code == 200 and sub.json['data']['id']
+    assert client.delete('/api/v1/push/subscriptions', headers=h,
+                         json={'endpoint': 'https://push.example.com/ep1'}).status_code == 200
+    # retired endpoints are gone
+    assert client.get('/api/v1/notification-subscriptions', headers=h).status_code == 404
+    assert client.get('/api/v1/rules', headers=h).status_code == 404
 
 
 # ── external API (opaque token) ──────────────────────────────────────────────

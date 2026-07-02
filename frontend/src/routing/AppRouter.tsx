@@ -22,6 +22,7 @@ const SettingsPage = lazyPage(() => import('@/pages/SettingsPage'), 'SettingsPag
 const UsersPage = lazyPage(() => import('@/pages/UsersPage'), 'UsersPage');
 const AiPage = lazyPage(() => import('@/pages/ai/AiPage'), 'AiPage');
 const AutomationPage = lazyPage(() => import('@/pages/automation/AutomationPage'), 'AutomationPage');
+const FlowEditorPage = lazyPage(() => import('@/pages/automation/flows/FlowEditorPage'), 'FlowEditorPage');
 const MonitorsPage = lazyPage(() => import('@/pages/monitors/MonitorsPage'), 'MonitorsPage');
 const KioskView = lazyPage(() => import('@/pages/monitor/KioskView'), 'KioskView');
 const AccessPage = lazyPage(() => import('@/pages/access/AccessPage'), 'AccessPage');
@@ -189,6 +190,23 @@ export function AppRouter() {
             element={
               <RequirePermission resource="rules" action="read">
                 <AutomationPage />
+              </RequirePermission>
+            }
+          />
+          {/* visual automation flow editor (graph canvas needs a full page) */}
+          <Route
+            path="/rules/flows/new"
+            element={
+              <RequirePermission resource="rules" action="create">
+                <FlowEditorPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/rules/flows/:flowUuid"
+            element={
+              <RequirePermission resource="rules" action="read">
+                <FlowEditorPage />
               </RequirePermission>
             }
           />

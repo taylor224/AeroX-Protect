@@ -49,6 +49,11 @@ class PushSubscription(SnowflakeMixin, TimestampMixin, BaseDB):
             cls.user_id == user_id, cls.enabled.is_(True), cls.deleted_at.is_(None)).all()
 
     @classmethod
+    def active_all(cls) -> list[Self]:
+        return db.session.query(cls).filter(
+            cls.enabled.is_(True), cls.deleted_at.is_(None)).all()
+
+    @classmethod
     def disable_by_endpoint(cls, user_id: int, endpoint: str):
         db.session.query(cls).filter(
             cls.endpoint_hash == hash_endpoint(endpoint), cls.user_id == user_id

@@ -1,21 +1,23 @@
 import { useState } from 'react';
 import { useIntl } from 'react-intl';
+import { useSearchParams } from 'react-router-dom';
 
 import { useAuthContext } from '@/auth/useAuthContext';
 import { ApiTokensTab } from '@/pages/automation/components/ApiTokensTab';
-import { NotificationsTab } from '@/pages/automation/components/NotificationsTab';
-import { RulesTab } from '@/pages/automation/components/RulesTab';
+import { FlowsTab } from '@/pages/automation/components/FlowsTab';
 
-type Tab = 'rules' | 'notifications' | 'tokens';
+type Tab = 'flows' | 'tokens';
+const TABS: Tab[] = ['flows', 'tokens'];
 
 export function AutomationPage() {
   const intl = useIntl();
   const { hasPermission } = useAuthContext();
-  const [tab, setTab] = useState<Tab>('rules');
+  const [params] = useSearchParams();
+  const initial = params.get('tab') as Tab | null;
+  const [tab, setTab] = useState<Tab>(initial && TABS.includes(initial) ? initial : 'flows');
 
   const tabs: { key: Tab; show: boolean }[] = [
-    { key: 'rules', show: hasPermission('rules', 'read') },
-    { key: 'notifications', show: hasPermission('notifications', 'read') },
+    { key: 'flows', show: hasPermission('rules', 'read') },
     { key: 'tokens', show: hasPermission('api_tokens', 'manage') },
   ];
 
@@ -34,7 +36,7 @@ export function AutomationPage() {
         </div>
       </div>
 
-      {tab === 'rules' ? <RulesTab /> : tab === 'notifications' ? <NotificationsTab /> : <ApiTokensTab />}
+      {tab === 'flows' ? <FlowsTab /> : <ApiTokensTab />}
     </div>
   );
 }

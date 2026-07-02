@@ -1,21 +1,17 @@
-"""P5 services: rule evaluator, pairing, api tokens, webhook driver (HMAC/SSRF), notification
-router, cron, and the outbox→rule→action pipeline."""
+"""P5 services: clause matching, pairing, api tokens, webhook driver (HMAC/SSRF), cron,
+and the trigger→flow→webhook pipeline. (Rule engine + subscription notification router
+were retired — flows are the automation surface, see tests/test_flows.py.)"""
 import hashlib
 import hmac
-import json
 
 import pytest
 
 from server.driver import webhook as webhook_drv
-from server.model import db, utcnow
 from server.model.api_token import ApiToken
 from server.model.monitor import Monitor
-from server.model.notification import Notification
-from server.model.notification_subscription import NotificationSubscription
-from server.model.rule import Rule
 from server.model.webhook_endpoint import WebhookEndpoint
 from server.service import api_token as api_token_svc
-from server.service import notification_router, pairing_code, rule_dispatcher, rule_evaluator
+from server.service import clause, flow_engine, pairing_code
 from server.service.trigger_router import TriggerEvent
 from server.util.cron import cron_match
 
@@ -31,49 +27,14 @@ def _trig(**kw):
     return TriggerEvent(**base)
 
 
-# ── rule evaluator ───────────────────────────────────────────────────────────
-def test_evaluate_event_type_match(app_db):
-    r = Rule.create({'name': 'm', 'trigger_type': 'event', 'trigger': {'event_types': ['motion']},
-                     'actions': [], 'cooldown_s': 0})
-    assert rule_evaluator.evaluate(r, _trig(type='motion')).matched
-    assert rule_evaluator.evaluate(r, _trig(type='tamper')).reason == 'condition_false'
-
-
-def test_evaluate_object_confidence(app_db):
-    r = Rule.create({'name': 'p', 'trigger_type': 'object', 'trigger': {'classes': ['person'], 'min_confidence': 60},
-                     'actions': [], 'cooldown_s': 0})
-    assert rule_evaluator.evaluate(r, _trig(trigger_type='object', type='object', classes=['person'], score=80)).matched
-    assert rule_evaluator.evaluate(r, _trig(trigger_type='object', type='object', classes=['person'], score=40)).reason == 'condition_false'
-
-
-def test_evaluate_condition_camera_and_clause(app_db):
-    r = Rule.create({'name': 'c', 'trigger_type': 'event', 'trigger': {},
-                     'condition': {'camera_ids': [5], 'all_of': [{'field': 'score', 'op': 'gte', 'value': 70}]},
-                     'actions': [], 'cooldown_s': 0})
-    assert rule_evaluator.evaluate(r, _trig(camera_id=5, score=80)).matched
-    assert rule_evaluator.evaluate(r, _trig(camera_id=9, score=80)).reason == 'condition_false'
-    assert rule_evaluator.evaluate(r, _trig(camera_id=5, score=50)).reason == 'condition_false'
-
-
-def test_cooldown_and_idempotency(app_db):
-    r = Rule.create({'name': 'cd', 'trigger_type': 'event', 'trigger': {}, 'actions': [],
-                     'cooldown_s': 60, 'dedup_scope': 'camera'})
-    trig = _trig(camera_id=5, event_id=100)
-    assert rule_evaluator.evaluate(r, trig).matched
-    rule_evaluator.mark_cooldown(r, trig)
-    assert rule_evaluator.evaluate(r, _trig(camera_id=5, event_id=101)).reason == 'cooldown'
-    # idempotency: first claim wins, duplicate loses
-    assert rule_evaluator.claim_idempotency(r, trig) is True
-    assert rule_evaluator.claim_idempotency(r, trig) is False
-
-
-def test_time_ranges_kst():
-    # Mon 2026-06-08 09:00 KST = 00:00 UTC → epoch ms
-    import datetime
-    from server.model import KST
-    ts = int(datetime.datetime(2026, 6, 8, 9, 0, tzinfo=KST).timestamp() * 1000)
-    assert rule_evaluator.in_time_ranges(ts, [{'dow': [1], 'start': '08:00', 'end': '18:00'}])
-    assert not rule_evaluator.in_time_ranges(ts, [{'dow': [1], 'start': '10:00', 'end': '18:00'}])
+# ── clause matching (flow condition nodes) ───────────────────────────────────
+def test_clause_ops_whitelist(app_db):
+    assert clause.match_clause({'field': 'score', 'op': 'gte', 'value': 70}, _trig(score=80))
+    assert not clause.match_clause({'field': 'score', 'op': 'gte', 'value': 90}, _trig(score=80))
+    assert clause.match_clause({'field': 'type', 'op': 'in', 'value': ['motion', 'tamper']}, _trig(type='motion'))
+    assert not clause.match_clause({'field': 'score', 'op': 'evil', 'value': 1}, _trig())   # unknown op → False
+    assert clause.match_clause({'field': 'object_class', 'op': 'in', 'value': ['person']},
+                               _trig(classes=['person', 'car']))
 
 
 # ── cron ─────────────────────────────────────────────────────────────────────
@@ -159,30 +120,8 @@ def test_webhook_retry_classification():
     assert not webhook_drv.is_retryable({'status': 'success', 'http_status': 200})
 
 
-# ── notification router ──────────────────────────────────────────────────────
-def test_notification_routing_and_mute(app_db):
-    uid = 1
-    NotificationSubscription.create(uid, {'channel': 'inapp', 'event_types': ['motion']})
-    payload = {'id': '777', 'camera_id': '5', 'type': 'motion', 'subtype': 'motion', 'ts': None}
-    counts = notification_router.route_event(payload)
-    assert counts['inapp'] == 1
-    total, unread, _ = Notification.list_for_user(uid)
-    assert total >= 1 and unread >= 1
-    # mute → suppressed
-    sub = NotificationSubscription.list_for_user(uid)[0]
-    sub.modify({'muted': True})
-    assert notification_router.route_event({**payload, 'id': '778'})['inapp'] == 0
-
-
-def test_notification_priority_floor(app_db):
-    NotificationSubscription.create(1, {'channel': 'inapp', 'min_priority': 'critical'})
-    # a 'high' priority object event is below the 'critical' floor → suppressed
-    counts = notification_router.route_event({'id': '9', 'camera_id': '5', 'type': 'object', 'subtype': 'person', 'ts': None})
-    assert counts['inapp'] == 0
-
-
-# ── full pipeline: trigger → rule → webhook action → execution log ────────────
-def test_pipeline_rule_to_webhook(app_db, monkeypatch):
+# ── full pipeline: trigger → flow → webhook action → run log ──────────────────
+def test_pipeline_flow_to_webhook(app_db, monkeypatch):
     calls = {'n': 0}
 
     def fake_post(url, **kw):
@@ -191,12 +130,19 @@ def test_pipeline_rule_to_webhook(app_db, monkeypatch):
 
     monkeypatch.setattr(webhook_drv.requests, 'post', fake_post)
     ep = WebhookEndpoint.create({'name': 'hk', 'url': 'http://10.0.0.9/h', 'secret': 'x'})
-    Rule.create({'name': 'motion-hook', 'trigger_type': 'event', 'trigger': {'event_types': ['motion']},
-                 'actions': [{'type': 'webhook', 'target_id': int(ep.id)}], 'cooldown_s': 0})
-    execs = rule_dispatcher.on_trigger(_trig(type='motion', event_id=500))
-    assert len(execs) == 1 and execs[0].status == 'success'
+    from server.model.flow import Flow
+    Flow.create({'name': 'motion-hook', 'graph': {
+        'nodes': [
+            {'id': 't', 'type': 'trigger', 'position': {'x': 0, 'y': 0},
+             'data': {'sources': [{'trigger_type': 'event', 'event_types': ['motion']}]}},
+            {'id': 'w', 'type': 'webhook', 'position': {'x': 200, 'y': 0},
+             'data': {'target_id': int(ep.id)}}],
+        'edges': [{'id': 'e', 'source': 't', 'target': 'w', 'sourceHandle': 'out'}]}})
+    runs = flow_engine.on_trigger(_trig(type='motion', event_id=500))
+    assert len(runs) == 1 and runs[0].status == 'success'
     assert calls['n'] == 1
-    assert execs[0].action_results[0]['type'] == 'webhook'
+    by_node = {r['node_id']: r for r in runs[0].node_results}
+    assert by_node['w']['status'] == 'success'
 
 
 def _dashboard():

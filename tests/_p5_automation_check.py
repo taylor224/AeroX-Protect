@@ -1,6 +1,7 @@
-"""Manual P5 e2e against the live stack: rule (event motion → webhook) fires from a simulated
-event via the outbox consumer and delivers a signed POST to a local receiver; monitor pairing
-(create→code→claim→/monitor/me scope→revoke→401); external API token (scope→/ext→revoke→401).
+"""Manual P5 e2e against the live stack: flow (event motion trigger → webhook node) fires
+from a simulated event via the outbox consumer and delivers a signed POST to a local
+receiver; monitor pairing (create→code→claim→/monitor/me scope→revoke→401); external API
+token (scope→/ext→revoke→401).
 
 A tiny host HTTP receiver captures the webhook; the backend container reaches it via
 host.docker.internal (dev SSRF guard allows private). Run:
@@ -77,19 +78,24 @@ if RECEIVED:
     expect = hmac.new(SECRET.encode(), (ts + '.').encode() + rec['body'], hashlib.sha256).hexdigest()
     check('HMAC signature valid', rec['headers'].get('X-Axp-Signature') == 'sha256=' + expect)
 
-# ── rule fires from a simulated event via the outbox consumer ────────────────────
-print('— create camera + rule (event motion → webhook)')
+# ── flow fires from a simulated event via the outbox consumer ────────────────────
+print('— create camera + flow (event motion trigger → webhook node)')
 cam = requests.post(f'{BACKEND}/cameras', headers=H, json={
-    'name': 'RuleCam', 'host': '192.0.2.77', 'vendor': 'onvif', 'driver': 'onvif',
+    'name': 'FlowCam', 'host': '192.0.2.77', 'vendor': 'onvif', 'driver': 'onvif',
     'rtsp_port': 554, 'username': 'admin', 'password': 'secret',
     'streams': [{'role': 'main', 'rtsp_path': '/main'}]}).json()['data']
-rule = requests.post(f'{BACKEND}/rules', headers=H, json={
-    'name': 'motion-webhook', 'trigger_type': 'event', 'trigger': {'event_types': ['motion']},
-    'condition': {}, 'actions': [{'type': 'webhook', 'target_id': int(hook['id'])}], 'cooldown_s': 0})
-check('rule created', rule.status_code == 200, rule.text[:200])
-rule_uuid = rule.json().get('data', {}).get('uuid')
+flow = requests.post(f'{BACKEND}/flows', headers=H, json={
+    'name': 'motion-webhook', 'cooldown_s': 0, 'graph': {
+        'nodes': [
+            {'id': 't', 'type': 'trigger', 'position': {'x': 0, 'y': 0},
+             'data': {'sources': [{'trigger_type': 'event', 'event_types': ['motion']}]}},
+            {'id': 'w', 'type': 'webhook', 'position': {'x': 250, 'y': 0},
+             'data': {'target_id': int(hook['id'])}}],
+        'edges': [{'id': 'e', 'source': 't', 'target': 'w', 'sourceHandle': 'out'}]}})
+check('flow created', flow.status_code == 200, flow.text[:200])
+flow_uuid = flow.json().get('data', {}).get('uuid')
 
-print('— simulate motion event → outbox → rule → webhook (waiting for consumer beat)')
+print('— simulate motion event → outbox → flow → webhook (waiting for consumer beat)')
 RECEIVED.clear()
 requests.post(f'{BACKEND}/events/simulate', headers=H,
               json={'camera_uuid': cam['uuid'], 'type': 'motion', 'score': 80})
@@ -99,14 +105,14 @@ for _ in range(8):
     if RECEIVED:
         fired = True
         break
-check('rule delivered webhook from event', fired)
-ex = requests.get(f'{BACKEND}/rule-executions', headers=H, params={'rule_id': rule.json()['data']['id']})
-exitems = ex.json().get('data', {}).get('items', []) if ex.status_code == 200 else []
-check('rule execution logged success', any(e['status'] == 'success' for e in exitems), str(exitems[:1]))
+check('flow delivered webhook from event', fired)
+runs = requests.get(f'{BACKEND}/flows/{flow_uuid}/runs', headers=H)
+runitems = runs.json().get('data', {}).get('items', []) if runs.status_code == 200 else []
+check('flow run logged success', any(r['status'] == 'success' for r in runitems), str(runitems[:1]))
 
-print('— manual fire endpoint')
-mf = requests.post(f'{BACKEND}/rules/{rule_uuid}/trigger', headers=H, json={})
-check('manual trigger success', mf.status_code == 200 and mf.json()['data']['status'] == 'success')
+print('— manual run endpoint')
+mf = requests.post(f'{BACKEND}/flows/{flow_uuid}/run', headers=H, json={})
+check('manual run success', mf.status_code == 200 and mf.json()['data']['status'] == 'success')
 
 # ── monitor pairing ─────────────────────────────────────────────────────────────
 print('— monitor pairing: create → code → claim → /monitor/me → revoke → 401')
@@ -146,7 +152,7 @@ check('revoked token → 401',
       requests.get(f'{BACKEND}/ext/events', headers={'Authorization': f'Bearer {raw}'}).status_code == 401)
 
 print('— cleanup')
-requests.delete(f"{BACKEND}/rules/{rule_uuid}", headers=H)
+requests.delete(f"{BACKEND}/flows/{flow_uuid}", headers=H)
 requests.delete(f"{BACKEND}/cameras/{cam['uuid']}", headers=H)
 server.shutdown()
 

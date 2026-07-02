@@ -1,25 +1,22 @@
-"""rule_executions + notifications retention (PLAN P5 §4.2, §4.9)."""
+"""flow_runs retention + action-target healthchecks (PLAN P5 §4.2)."""
 import logging
 from datetime import timedelta
 
 from server.model import utcnow
-from server.model.notification import Notification
-from server.model.rule_execution import RuleExecution
+from server.model.flow_run import FlowRun
 from server.task.celery import app, celery_use_db
 
 logger = logging.getLogger(__name__)
 EXEC_RETENTION_DAYS = 90
-NOTIF_RETENTION_DAYS = 60
 
 
 @app.task(name='server.task.list.p5_retention.run')
 @celery_use_db()
 def run():
-    execs = RuleExecution.purge_older_than(utcnow() - timedelta(days=EXEC_RETENTION_DAYS))
-    notifs = Notification.purge_older_than(utcnow() - timedelta(days=NOTIF_RETENTION_DAYS))
-    if execs or notifs:
-        logger.info('p5_retention: %d executions, %d notifications purged', execs, notifs)
-    return {'rule_executions': execs, 'notifications': notifs}
+    flow_runs = FlowRun.purge_older_than(utcnow() - timedelta(days=EXEC_RETENTION_DAYS))
+    if flow_runs:
+        logger.info('p5_retention: %d flow runs purged', flow_runs)
+    return {'flow_runs': flow_runs}
 
 
 @app.task(name='server.task.list.p5_retention.healthcheck_targets')

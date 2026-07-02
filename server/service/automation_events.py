@@ -1,8 +1,8 @@
-"""System/device lifecycle events → automation rules (system_event trigger).
+"""System/device lifecycle events → automation flows (system_event trigger).
 
 `emit()` is called from anywhere a notable device state change happens (camera health
 flip, config change, doorbell ring, IO input edge, device reachability). It builds a
-`system_event` TriggerEvent and runs the rule engine. Best-effort: emitting must NEVER break
+`system_event` TriggerEvent and runs the flow engine. Best-effort: emitting must NEVER break
 the caller (a camera-health pass, a config save), so all failures are swallowed + logged.
 """
 import logging
@@ -24,10 +24,10 @@ EVENTS = {
 
 
 def emit(event_type: str, camera_id=None, attrs: dict | None = None) -> None:
-    """Fire a system_event trigger through the rule engine. Synchronous + best-effort."""
+    """Fire a system_event trigger through the flow engine. Synchronous + best-effort."""
     try:
-        from server.service import rule_dispatcher, trigger_router
+        from server.service import flow_engine, trigger_router
         trig = trigger_router.from_system_event(event_type, camera_id=camera_id, attrs=attrs or {})
-        rule_dispatcher.on_trigger(trig)
+        flow_engine.on_trigger(trig)
     except Exception:                       # noqa: BLE001 — never break the caller
         logger.exception('automation emit failed (%s)', event_type)

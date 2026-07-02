@@ -196,7 +196,64 @@ export function SettingsPage() {
       <TwilioConfigCard />
       <FeatureFlagsCard />
       <PortalConfigCard />
+      <WebPushCard />
     </div>
+  );
+}
+
+// ── web push (this browser) — target of flow `push` action nodes ─────────────
+function urlB64ToUint8Array(base64: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+function WebPushCard() {
+  const intl = useIntl();
+
+  const enableMut = useMutation({
+    mutationFn: async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('unsupported');
+      const { api } = await import('@/lib/axios');
+      const { data } = await api.get<{ data: { public_key: string } }>('/push/vapid-public-key');
+      const key = data.data?.public_key;
+      if (!key) throw new Error('no_vapid');
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(key) as BufferSource });
+      const json = sub.toJSON();
+      await api.post('/push/subscriptions', { endpoint: json.endpoint, keys: json.keys, ua: navigator.userAgent });
+    },
+    onSuccess: () => toast.success(intl.formatMessage({ id: 'auto.push_enabled' })),
+    onError: () => toast.error(intl.formatMessage({ id: 'auto.push_unsupported' })),
+  });
+
+  const testMut = useMutation({
+    mutationFn: async () => {
+      const { api } = await import('@/lib/axios');
+      const { data } = await api.post<{ data: { sent: number } }>('/push/test', {});
+      return data.data;
+    },
+    onSuccess: (d) => toast.success(intl.formatMessage({ id: 'settings.push_test_sent' }, { sent: d?.sent ?? 0 })),
+    onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{intl.formatMessage({ id: 'settings.push_title' })}</CardTitle>
+        <p className="text-xs text-muted-foreground">{intl.formatMessage({ id: 'settings.push_desc' })}</p>
+      </CardHeader>
+      <CardContent className="flex gap-2">
+        <Button variant="outline" size="sm" disabled={enableMut.isPending} onClick={() => enableMut.mutate()}>
+          {intl.formatMessage({ id: 'auto.enable_push' })}
+        </Button>
+        <Button variant="outline" size="sm" disabled={testMut.isPending} onClick={() => testMut.mutate()}>
+          {intl.formatMessage({ id: 'settings.push_test' })}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

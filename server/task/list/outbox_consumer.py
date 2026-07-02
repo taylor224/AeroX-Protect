@@ -1,6 +1,6 @@
 """P3 event_outbox consumer (PLAN P5 §6.1) — the primary trigger source. Polls pending rows,
-normalizes to TriggerEvent, runs the rule engine + notification router + external webhook
-subscriptions, then marks the row consumed (at-least-once; idempotency dedups)."""
+normalizes to TriggerEvent, runs the flow engine + external webhook subscriptions, then
+marks the row consumed (at-least-once; flow cooldowns dedup)."""
 import logging
 
 from server.model import db
@@ -15,14 +15,13 @@ MAX_ATTEMPTS = 5
 @celery_use_db()
 def consume():
     from server.controller.external import ExternalController
-    from server.service import notification_router, rule_dispatcher, trigger_router
+    from server.service import flow_engine, trigger_router
 
     rows = EventOutbox.get_pending(limit=100)
     for row in rows:
         try:
             trig = trigger_router.from_outbox(row)
-            rule_dispatcher.on_trigger(trig)               # automation rules
-            notification_router.route_event(row.payload)   # user notifications
+            flow_engine.on_trigger(trig)                   # automation flows
             ExternalController.deliver_subscriptions(row.payload)  # external webhook subscriptions
             row.mark_consumed()
         except Exception:

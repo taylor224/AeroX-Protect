@@ -179,40 +179,8 @@ def test_ext_stream_honors_camera_scope(client, monkeypatch):
     assert 'data:' in r.get_data(as_text=True)        # in-scope still streams
 
 
-# ── notifications: quiet hours + snooze ───────────────────────────────────────
-def _sub(**kw):
-    from server.model.notification_subscription import NotificationSubscription
-    s = NotificationSubscription()
-    s.channel = 'push'
-    s.min_priority = 'normal'
-    s.muted = False
-    for k, v in kw.items():
-        setattr(s, k, v)
-    return s
-
-
-def test_quiet_hours_uses_event_start_ts(app_db):
-    from server.service.notification_router import _suppressed
-    quiet = {'ranges': [{'start': '00:00', 'end': '06:00'}]}    # KST 00–06
-    noon_kst = int(datetime(2026, 6, 11, 3, 0, tzinfo=UTC).timestamp() * 1000)   # KST 12:00
-    night_kst = int(datetime(2026, 6, 11, 18, 0, tzinfo=UTC).timestamp() * 1000)  # KST 03:00
-
-    sub = _sub(quiet_hours=quiet)
-    # event payloads have start_ts (epoch ms), not 'ts' — must not read as "always quiet"
-    assert _suppressed(sub, 'normal', {'start_ts': noon_kst}) is False
-    assert _suppressed(sub, 'normal', {'start_ts': night_kst}) is True
-
-
-def test_muted_until_epoch_ms_coerced_and_clearable(app_db):
-    from server.model.notification_subscription import NotificationSubscription
-    from server.service.notification_router import _suppressed
-    future_ms = to_epoch_ms(utcnow() + timedelta(minutes=30))
-    sub = NotificationSubscription.create(1, {'channel': 'push', 'muted_until': future_ms})
-    assert isinstance(sub.muted_until, datetime)              # not a raw int
-    assert _suppressed(sub, 'critical', {'start_ts': to_epoch_ms(utcnow())}) is True
-    sub.modify({'muted_until': None})                         # explicit null clears the snooze
-    assert sub.muted_until is None
-    assert _suppressed(sub, 'normal', {'start_ts': to_epoch_ms(utcnow())}) is False
+# (quiet-hours / snooze suppression tests removed with the subscription notification
+#  router — flows are the only notification policy now)
 
 
 # ── access control: require_pin ───────────────────────────────────────────────

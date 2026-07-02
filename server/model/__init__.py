@@ -171,15 +171,13 @@ import server.model.object_trigger  # noqa: E402,F401
 import server.model.ai_node        # noqa: E402,F401
 import server.model.detection_assignment  # noqa: E402,F401
 import server.model.ai_settings    # noqa: E402,F401
-import server.model.rule           # noqa: E402,F401
-import server.model.rule_execution  # noqa: E402,F401
+import server.model.flow           # noqa: E402,F401
+import server.model.flow_run       # noqa: E402,F401
 import server.model.action_target  # noqa: E402,F401
 import server.model.webhook_endpoint  # noqa: E402,F401
 import server.model.monitor        # noqa: E402,F401
 import server.model.pairing_code   # noqa: E402,F401
-import server.model.notification_subscription  # noqa: E402,F401
 import server.model.push_subscription  # noqa: E402,F401
-import server.model.notification   # noqa: E402,F401
 import server.model.api_token      # noqa: E402,F401
 import server.model.setting       # noqa: E402,F401
 # P6
