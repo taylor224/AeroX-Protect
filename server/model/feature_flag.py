@@ -50,6 +50,8 @@ FEATURE_FLAG_SEEDS: list[tuple[str, bool, str]] = [
     ('remote_portal', True, '원격 포털 (P9 — 선택적 TURN 릴레이 설정; 기본 원격 보기는 WebSocket으로 동작)'),
     # P10 — access control (doors, credentials, access events)
     ('access_control', True, '출입 통제 (P10 — 도어 컨트롤러/카드, 하드웨어 필요)'),
+    # encoder worker nodes — offload live/playback H.264 transcode to separate servers
+    ('encoding_nodes', False, '인코딩 워커 노드 (라이브/재생 H.264 트랜스코드 오프로드)'),
 ]
 
 # Flags hidden from the Settings → Feature-flags list. They're now always-available and

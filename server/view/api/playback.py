@@ -140,6 +140,12 @@ def _ensure_hls_ts(seg: Segment, src_path: str, transcode: bool) -> str | None:
             return out
     except OSError:
         pass
+    if transcode:
+        # Encoder-node offload (feature-flagged): ship the raw segment to a node and cache
+        # its H.264 rendition. False on any problem → the local ffmpeg path below.
+        from server.service import encode_offload
+        if encode_offload.transcode_segment(src_path, out):
+            return out
     tmp = '%s.tmp.%d' % (out, os.getpid())
     cmd = (ffmpeg.build_hls_transcode_cmd(src_path, tmp) if transcode
            else ffmpeg.build_hls_remux_cmd(src_path, tmp))

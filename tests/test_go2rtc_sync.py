@@ -88,3 +88,68 @@ def test_remove_camera_deletes_each_stream():
 
     remove_camera(_cam([_stream('cam_x_main'), _stream('cam_x_sub')]), driver=FakeDriver())
     assert deleted == ['cam_x_main', 'cam_x_sub']
+
+
+# ── encoder-node offload wiring (2026-07-03) ──────────────────────────────────
+def test_build_source_offloaded_uses_self_loop(monkeypatch):
+    import server.service.go2rtc_sync as gs
+    cam = _cam([])
+    cam.live_transcode = True
+    live = _stream(path='/live')
+    live.is_default_live = True
+
+    monkeypatch.setattr(gs, '_offload_target',
+                        lambda camera: {'enc_name': 'cam_x_sub_enc', 'raw_name': 'cam_x_sub_raw'})
+    assert build_source(cam, live) == 'rtsp://127.0.0.1:8554/cam_x_sub_enc'
+
+    # no active offload → the normal local go2rtc ffmpeg transcode
+    monkeypatch.setattr(gs, '_offload_target', lambda camera: None)
+    assert build_source(cam, live) == 'ffmpeg:rtsp://admin:p%40ss@10.0.0.5:554/live#video=h264#audio=aac'
+
+
+def test_sync_camera_registers_and_cleans_companions(monkeypatch):
+    import server.service.go2rtc_sync as gs
+    puts, deletes = [], []
+
+    class FakeDriver:
+        def put_stream(self, name, src):
+            puts.append((name, src))
+
+        def delete_stream(self, name):
+            deletes.append(name)
+
+    cam = _cam([_stream('cam_x_sub', '/sub')])
+    monkeypatch.setattr(gs, 'offload_companions',
+                        lambda camera: ([('cam_x_sub_raw', 'rtsp://cam/sub#video=copy#audio=copy')], []))
+    res = sync_camera(cam, driver=FakeDriver())
+    assert ('cam_x_sub_raw', 'rtsp://cam/sub#video=copy#audio=copy') in puts
+    assert res['cam_x_sub_raw']['ok'] is True
+
+    puts.clear()
+    monkeypatch.setattr(gs, 'offload_companions',
+                        lambda camera: ([], ['cam_x_sub_raw', 'cam_x_sub_enc']))
+    sync_camera(cam, driver=FakeDriver())
+    assert deletes == ['cam_x_sub_raw', 'cam_x_sub_enc']
+    assert all(name != 'cam_x_sub_raw' for name, _ in puts)
+
+
+def test_expected_names_includes_offload_raw(monkeypatch):
+    import server.service.go2rtc_sync as gs
+    cam = _cam([_stream('cam_x_main', '/main'), _stream('cam_x_sub', '/sub')])
+    monkeypatch.setattr(gs, 'offload_companions', lambda camera: ([('cam_x_sub_raw', 'src')], []))
+    assert gs.expected_names(cam) == {'cam_x_main', 'cam_x_sub', 'cam_x_sub_raw'}
+    monkeypatch.setattr(gs, 'offload_companions', lambda camera: ([], []))
+    assert gs.expected_names(cam) == {'cam_x_main', 'cam_x_sub'}
+
+
+def test_remove_camera_deletes_offload_companions():
+    deleted = []
+
+    class FakeDriver:
+        def delete_stream(self, name):
+            deleted.append(name)
+
+    live = _stream('cam_x_sub', '/sub')
+    live.is_default_live = True
+    remove_camera(_cam([live]), driver=FakeDriver())
+    assert deleted == ['cam_x_sub', 'cam_x_sub_raw', 'cam_x_sub_enc']

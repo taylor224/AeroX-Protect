@@ -9,6 +9,8 @@ export interface GeneralSettings {
   default_language: 'ko' | 'en';
   /** Server LAN IP advertised as a WebRTC ICE candidate (blank → WebRTC off, MSE fallback). */
   webrtc_candidate_ip: string;
+  /** Stop live H.264 transcodes after this many seconds with no viewer (0 = always warm). */
+  live_transcode_idle_s: number;
 }
 
 export async function getGeneralSettings(): Promise<GeneralSettings> {

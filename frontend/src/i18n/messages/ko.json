@@ -810,5 +810,12 @@
   "error.forbidden.title": "접근 권한이 없습니다",
   "error.forbidden.desc": "이 페이지를 볼 수 있는 권한이 없습니다.",
   "error.notfound.title": "페이지를 찾을 수 없습니다",
-  "error.back_home": "홈으로"
+  "error.back_home": "홈으로",
+  "ai.tab.encoders": "인코딩 노드",
+  "enc.nodes": "인코딩 노드",
+  "enc.subtitle": "라이브(H.265→H.264)·재생 트랜스코딩을 별도 인코더 서버로 분산합니다. 시청자가 없는 카메라는 자동으로 인코딩을 쉽니다.",
+  "enc.no_assignments": "할당이 없습니다. (시청 중인 트랜스코드 카메라에만 할당됩니다)",
+  "settings.saved": "설정이 저장되었습니다.",
+  "settings.live_idle": "라이브 트랜스코드 유휴 정지(초)",
+  "settings.live_idle.desc": "이 시간 동안 시청자가 없으면 H.264 라이브 인코딩을 멈춥니다. 0 = 항상 유지(예열)."
 }

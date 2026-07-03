@@ -25,8 +25,8 @@ def live_transcode_enabled(camera, stream) -> bool:
     return getattr(camera, 'live_transcode', False) or (getattr(stream, 'codec', None) == 'h265')
 
 
-def build_source(camera, stream) -> str:
-    """go2rtc source for a camera stream (copy = no re-encode).
+def _source_parts(camera, stream) -> tuple[str, str]:
+    """(camera rtsp url with credentials, go2rtc input preset suffix).
 
     `camera.rtsp_transport` selects how go2rtc connects to the camera over RTSP:
       - auto (default/NULL) → go2rtc's native RTSP client (interleaved TCP)
@@ -42,6 +42,27 @@ def build_source(camera, stream) -> str:
 
     transport = (getattr(camera, 'rtsp_transport', None) or 'auto').lower()
     input_pre = '#input=rtsp/%s' % transport if transport in ('tcp', 'udp') else ''
+    return rtsp_url, input_pre
+
+
+def _copy_source(rtsp_url: str, input_pre: str) -> str:
+    if input_pre:
+        return 'ffmpeg:%s%s#video=copy#audio=copy' % (rtsp_url, input_pre)
+    return '%s#video=copy#audio=copy' % rtsp_url
+
+
+def _offload_target(camera) -> dict | None:
+    """Active encoder-node offload for the camera's live transcode (None = local)."""
+    try:
+        from server.service.encode_offload import live_offload_target
+        return live_offload_target(camera)
+    except Exception:
+        return None
+
+
+def build_source(camera, stream) -> str:
+    """go2rtc source for a camera stream (copy = no re-encode)."""
+    rtsp_url, input_pre = _source_parts(camera, stream)
 
     # Live transcode (H.265 cams): browsers can't decode H.265 over WebRTC/MSE, so for the
     # default-live stream we transcode to H.264 via go2rtc's ffmpeg source. go2rtc runs ONE
@@ -49,11 +70,68 @@ def build_source(camera, stream) -> str:
     # and it's on-demand (no watchers → no ffmpeg). The main/archive stream stays copy.
     # Audio is transcoded to AAC too — a copied PCM/G.711 track can't play over MSE.
     if live_transcode_enabled(camera, stream):
+        off = _offload_target(camera)
+        if off:
+            # An encoder node publishes the H.264 rendition into <name>_enc; the
+            # viewer-facing stream self-pulls it from go2rtc's own RTSP server, so the
+            # frontend keeps the same stream name and this stays on-demand.
+            return 'rtsp://127.0.0.1:8554/%s' % off['enc_name']
         return 'ffmpeg:%s%s#video=h264#audio=aac' % (rtsp_url, input_pre)
 
-    if input_pre:
-        return 'ffmpeg:%s%s#video=copy#audio=copy' % (rtsp_url, input_pre)
-    return '%s#video=copy#audio=copy' % rtsp_url
+    return _copy_source(rtsp_url, input_pre)
+
+
+def offload_companions(camera) -> tuple[list[tuple[str, str]], list[str]]:
+    """Encoder-offload companion streams for this camera: (puts, deletes).
+
+    While an encode assignment exists (any state), the encoder needs `<name>_raw` — a
+    plain copy of the camera's default-live stream — to pull from go2rtc (one camera
+    connection, multiplexed). The `<name>_enc` stream is created by the encoder's RTSP
+    publish, never PUT here. With no assignment both companions are deleted (idempotent
+    cleanup). Flag off ⇒ ([], []) — cost 0, and stale companions are harmless on-demand
+    leftovers cleared by the next go2rtc restart."""
+    try:
+        from server.service import encode_config_resolver
+        from server.service.encode_offload import assignment_for
+        stream = encode_config_resolver.default_live_stream(camera)
+        if stream is None:
+            return [], []
+        raw = encode_config_resolver.raw_name(stream)
+        enc = encode_config_resolver.enc_name(stream)
+        if assignment_for(camera) is None:
+            from server.service.feature_flag import is_enabled
+            return ([], [raw, enc]) if is_enabled('encoding_nodes') else ([], [])
+        rtsp_url, input_pre = _source_parts(camera, stream)
+        return [(raw, _copy_source(rtsp_url, input_pre))], []
+    except Exception as e:
+        logger.debug('offload companion resolve failed for %s: %s', camera.uuid, e)
+        return [], []
+
+
+def expected_names(camera) -> set[str]:
+    """Stream names camera_health should expect in go2rtc after a restart — the DB
+    streams plus the offload raw companion. `<name>_enc` is publish-created by the
+    encoder, so it is never 'expected'."""
+    want = {s.go2rtc_name for s in camera.streams if s.enabled}
+    puts, _deletes = offload_companions(camera)
+    want.update(name for name, _src in puts)
+    return want
+
+
+def _sync_offload_companions(camera, driver: Go2rtcDriver, results: dict) -> None:
+    puts, deletes = offload_companions(camera)
+    for name, src in puts:
+        try:
+            driver.put_stream(name, src)
+            results[name] = {'ok': True}
+        except Go2rtcError as e:
+            logger.warning('go2rtc sync failed for %s: %s', name, e)
+            results[name] = {'ok': False, 'error': str(e)}
+    for name in deletes:
+        try:
+            driver.delete_stream(name)
+        except Go2rtcError:
+            pass
 
 
 def sync_camera(camera, driver: Go2rtcDriver | None = None) -> dict:
@@ -69,6 +147,7 @@ def sync_camera(camera, driver: Go2rtcDriver | None = None) -> dict:
         except Go2rtcError as e:
             logger.warning('go2rtc sync failed for %s: %s', stream.go2rtc_name, e)
             results[stream.go2rtc_name] = {'ok': False, 'error': str(e)}
+    _sync_offload_companions(camera, driver, results)
     return results
 
 
@@ -76,7 +155,11 @@ def remove_camera(camera, driver: Go2rtcDriver | None = None) -> None:
     """Remove a camera's streams from go2rtc (call before soft-deleting streams)."""
     driver = driver or Go2rtcDriver()
     for stream in camera.streams:
-        try:
-            driver.delete_stream(stream.go2rtc_name)
-        except Go2rtcError as e:
-            logger.warning('go2rtc remove failed for %s: %s', stream.go2rtc_name, e)
+        names = [stream.go2rtc_name]
+        if getattr(stream, 'is_default_live', False):
+            names += ['%s_raw' % stream.go2rtc_name, '%s_enc' % stream.go2rtc_name]
+        for name in names:
+            try:
+                driver.delete_stream(name)
+            except Go2rtcError as e:
+                logger.warning('go2rtc remove failed for %s: %s', name, e)

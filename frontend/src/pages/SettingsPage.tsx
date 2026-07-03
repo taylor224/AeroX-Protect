@@ -31,11 +31,13 @@ export function SettingsPage() {
   const [tz, setTz] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [webrtcIp, setWebrtcIp] = useState('');
+  const [idleS, setIdleS] = useState('');
   useEffect(() => {
     if (settingsQuery.data) {
       setTz(settingsQuery.data.timezone);
       setBaseUrl(settingsQuery.data.public_base_url ?? '');
       setWebrtcIp(settingsQuery.data.webrtc_candidate_ip ?? '');
+      setIdleS(String(settingsQuery.data.live_transcode_idle_s ?? 300));
     }
   }, [settingsQuery.data]);
 
@@ -77,6 +79,15 @@ export function SettingsPage() {
       void queryClient.invalidateQueries({ queryKey: ['general-settings'] });
     },
     onError: () => toast.error(intl.formatMessage({ id: 'settings.webrtc_ip_invalid' })),
+  });
+
+  const saveIdle = useMutation({
+    mutationFn: () => updateGeneralSettings({ live_transcode_idle_s: Number(idleS) }),
+    onSuccess: () => {
+      toast.success(intl.formatMessage({ id: 'settings.saved' }));
+      void queryClient.invalidateQueries({ queryKey: ['general-settings'] });
+    },
+    onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
   });
 
   return (
@@ -184,6 +195,36 @@ export function SettingsPage() {
                 <Button size="sm"
                   disabled={saveWebrtcIp.isPending || webrtcIp.trim() === (settingsQuery.data?.webrtc_candidate_ip ?? '')}
                   onClick={() => saveWebrtcIp.mutate()}>
+                  {intl.formatMessage({ id: 'common.save' })}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-foreground">
+                {intl.formatMessage({ id: 'settings.live_idle' })}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {intl.formatMessage({ id: 'settings.live_idle.desc' })}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={0}
+                max={86400}
+                className="h-9 w-32"
+                value={idleS}
+                disabled={!canManage}
+                onChange={(e) => setIdleS(e.target.value)}
+              />
+              {canManage && (
+                <Button size="sm"
+                  disabled={saveIdle.isPending || idleS === '' ||
+                    Number(idleS) === (settingsQuery.data?.live_transcode_idle_s ?? 300)}
+                  onClick={() => saveIdle.mutate()}>
                   {intl.formatMessage({ id: 'common.save' })}
                 </Button>
               )}

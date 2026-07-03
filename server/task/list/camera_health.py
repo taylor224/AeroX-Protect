@@ -74,10 +74,10 @@ def _ensure_all_registered(camera, registered: set | None) -> bool:
     Returns True if a full sync was issued."""
     if registered is None:
         return False
-    want = {s.go2rtc_name for s in camera.streams if s.enabled}
+    from server.service import go2rtc_sync
+    want = go2rtc_sync.expected_names(camera)
     if want and not want.issubset(registered):
         try:
-            from server.service import go2rtc_sync
             go2rtc_sync.sync_camera(camera)
             return True
         except Exception as e:                   # noqa: BLE001

@@ -65,6 +65,10 @@ beat_schedule = {
         'task': 'server.task.list.ai_supervise.supervise_nodes',
         'schedule': 10.0,   # node health sweep + rebalance
     },
+    'supervise_encode_nodes': {
+        'task': 'server.task.list.encode_supervise.supervise_encode_nodes',
+        'schedule': 10.0,   # encoder node health sweep + activity-gated rebalance
+    },
     'backfill_segments': {
         'task': 'server.task.list.detection_linker.backfill_segments',
         'schedule': 30.0,

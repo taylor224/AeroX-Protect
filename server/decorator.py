@@ -62,6 +62,31 @@ def node_token_required(func):
     return wrapper
 
 
+def encode_node_token_required(func):
+    """Guard for encoder-node APIs. Same aud=node scoped token as AI nodes; identity is
+    resolved against encoding_nodes (disjoint Snowflake id spaces keep the two node kinds
+    isolated). Sets g.current_encode_node."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        from server.model.encoding_node import EncodingNode
+        from server.service.token import TokenService
+        auth = request.headers.get('Authorization', '')
+        if not auth.startswith('Bearer '):
+            return ResponseBuilder.no_permission('node_auth_required')
+        try:
+            claims = TokenService.verify_node_token(auth[7:].strip())
+        except Exception:
+            return ResponseBuilder.no_permission('invalid_node_token')
+        node = EncodingNode.get_by_uuid(claims.get('sub', ''))
+        if not node or not node.enabled or node.deleted_at is not None:
+            return ResponseBuilder.forbidden('node_disabled')
+        if node.token_jti and claims.get('jti') != node.token_jti:
+            return ResponseBuilder.forbidden('node_token_superseded')
+        g.current_encode_node = node
+        return func(*args, **kwargs)
+    return wrapper
+
+
 def api_token_required(*required_scopes: str):
     """Guard for external API (PLAN P5 §5.6). Opaque token (Bearer or X-API-Key), scope +
     rate-limit enforced. Sets g.api_token (camera scope intersection used in controllers)."""

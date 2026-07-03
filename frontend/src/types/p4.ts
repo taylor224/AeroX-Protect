@@ -107,6 +107,32 @@ export interface AiAssignment {
   last_report_ts: number | null;
 }
 
+export interface EncodingNode {
+  id: string;
+  uuid: string;
+  name: string;
+  kind: 'builtin' | 'remote';
+  status: 'online' | 'degraded' | 'offline' | 'draining' | 'disabled';
+  enabled: boolean;
+  endpoint: string | null;
+  hwaccel: string | null;
+  max_sessions: number;
+  assigned_count: number;
+  version: string | null;
+  last_heartbeat_ts: number | null;
+  last_error: string | null;
+}
+
+export interface EncodeAssignment {
+  id: string;
+  camera_id: string;
+  node_id: string;
+  state: string;
+  epoch: number;
+  claimed_at: number | null;
+  last_report_ts: number | null;
+}
+
 export interface AiSettings {
   id: string;
   camera_id: string | null;

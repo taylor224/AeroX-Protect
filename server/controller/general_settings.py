@@ -21,6 +21,9 @@ class GeneralSettingsController:
             # server LAN IP advertised as a WebRTC ICE candidate so low-latency WebRTC live works
             # on the local network (blank = no candidate; clients use the MSE fallback)
             'webrtc_candidate_ip': Setting.get_value('webrtc_candidate_ip', '') or '',
+            # idle-stop for live H.264 transcodes: stop after this many seconds without a
+            # viewer (0 = keep always warm, the pre-idle-stop behavior)
+            'live_transcode_idle_s': int(Setting.get_value('live_transcode_idle_s', 300) or 0),
         }
 
     @classmethod
@@ -59,6 +62,16 @@ class GeneralSettingsController:
             Setting.set_value('webrtc_candidate_ip', ip)
             AuditLog.record('settings_updated', target='webrtc_candidate_ip', user_id=actor.id,
                             detail={'webrtc_candidate_ip': ip})
+        if 'live_transcode_idle_s' in data:
+            try:
+                idle = int(data.get('live_transcode_idle_s'))
+            except (TypeError, ValueError):
+                raise InvalidParameterException('live_transcode_idle_s must be an integer (seconds)')
+            if idle < 0 or idle > 86400:
+                raise InvalidParameterException('live_transcode_idle_s must be 0..86400')
+            Setting.set_value('live_transcode_idle_s', idle)
+            AuditLog.record('settings_updated', target='live_transcode_idle_s', user_id=actor.id,
+                            detail={'live_transcode_idle_s': idle})
         return cls.get()
 
 

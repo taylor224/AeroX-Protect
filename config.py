@@ -71,6 +71,12 @@ CREDENTIAL_ENC_KEY = os.getenv('CREDENTIAL_ENC_KEY')
 GO2RTC_URL = os.getenv('GO2RTC_URL', 'http://axp-go2rtc:1984')
 GO2RTC_RTSP = os.getenv('GO2RTC_RTSP', 'rtsp://axp-go2rtc:8554')
 
+# ── Encoder worker nodes ─────────────────────────────────────────────────────
+# Shared secret the backend sends on playback POST /transcode calls to encoder nodes.
+# Same-host compose derives it from SECRET_KEY; a REMOTE encoder must set the same
+# ENCODE_CALLBACK_SECRET on both sides (unset on the node = LAN-trust: private IPs only).
+ENCODE_CALLBACK_SECRET = os.getenv('ENCODE_CALLBACK_SECRET') or ((SECRET_KEY + ':enc') if SECRET_KEY else '')
+
 # ── Recording / storage (P2) ─────────────────────────────────────────────────
 DISK_ROOT = os.getenv('AXP_DISK_ROOT', '/mnt/axp')       # scanned for pool disks
 MIN_WRITE_HEADROOM_BYTES = int(os.getenv('MIN_WRITE_HEADROOM_BYTES', str(2 * 1024 * 1024 * 1024)))  # 2GB

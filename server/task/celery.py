@@ -30,6 +30,7 @@ app = Celery(
         'server.task.list.event_maintenance',
         'server.task.list.timelapse',
         'server.task.list.ai_supervise',
+        'server.task.list.encode_supervise',
         'server.task.list.detection_linker',
         'server.task.list.detection_retention',
         'server.task.list.ai_crop_thumb',

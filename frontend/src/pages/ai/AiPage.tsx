@@ -8,19 +8,21 @@ import { useFeatureFlag } from '@/lib/featureFlags';
 import { listCameras } from '@/pages/cameras/camera.api';
 import { AiNodes } from '@/pages/ai/components/AiNodes';
 import { AiSettingsPanel } from '@/pages/ai/components/AiSettingsPanel';
+import { EncodingNodes } from '@/pages/ai/components/EncodingNodes';
 import { AudioDetections } from '@/pages/ai/components/AudioDetections';
 import { CountingEditor } from '@/pages/ai/components/CountingEditor';
 import { ObjectSearch } from '@/pages/ai/components/ObjectSearch';
 import { ObjectTriggers } from '@/pages/ai/components/ObjectTriggers';
 import { ZoneEditor } from '@/pages/ai/components/ZoneEditor';
 
-type Tab = 'search' | 'zones' | 'triggers' | 'counting' | 'audio' | 'settings' | 'nodes';
+type Tab = 'search' | 'zones' | 'triggers' | 'counting' | 'audio' | 'settings' | 'nodes' | 'encoders';
 
 export function AiPage() {
   const intl = useIntl();
   const { hasPermission } = useAuthContext();
   const countingEnabled = useFeatureFlag('object_counting') || useFeatureFlag('loitering');
   const audioEnabled = useFeatureFlag('audio_detection');
+  const encodersEnabled = useFeatureFlag('encoding_nodes');
   const [tab, setTab] = useState<Tab>('search');
   const [cameraUuid, setCameraUuid] = useState('');
 
@@ -37,6 +39,7 @@ export function AiPage() {
     { key: 'audio', show: hasPermission('ai', 'audio') && audioEnabled, cam: true },
     { key: 'settings', show: hasPermission('ai', 'read'), cam: false },
     { key: 'nodes', show: hasPermission('ai_nodes', 'manage'), cam: false },
+    { key: 'encoders', show: hasPermission('encoding_nodes', 'manage') && encodersEnabled, cam: false },
   ];
   const active = tabs.find((t) => t.key === tab);
   const needsCamera = active?.cam ?? false;
@@ -88,6 +91,8 @@ export function AiPage() {
         <AudioDetections cameraUuid={selectedUuid} />
       ) : tab === 'settings' ? (
         <AiSettingsPanel canEdit={hasPermission('ai', 'update')} />
+      ) : tab === 'encoders' ? (
+        <EncodingNodes />
       ) : (
         <AiNodes />
       )}

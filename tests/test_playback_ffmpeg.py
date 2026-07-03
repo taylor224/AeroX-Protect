@@ -88,3 +88,67 @@ def test_parse_probe():
             'format': {'duration': '10.5'}}
     m = ffmpeg.parse_probe(data)
     assert m['video_codec'] == 'h265' and m['width'] == 2560 and m['has_audio'] and m['duration_ms'] == 10500
+
+
+# ── encoder-node playback offload (2026-07-03) ────────────────────────────────
+def _hls_env(tmp_path):
+    c = Camera()
+    c.name = 'c'
+    c.host = 'h'
+    c.vendor = 'onvif'
+    c.driver = 'onvif'
+    c.is_enabled = True
+    db.session.add(c)
+    d = Disk()
+    d.name = 'd'
+    d.mount_path = str(tmp_path)
+    d.role = 'record'
+    db.session.add(d)
+    db.session.commit()
+    seg = Segment.create(camera_id=c.id, disk_id=d.id, rel_path='%s/seg.ts' % c.id,
+                         start_ts=utcnow(), end_ts=utcnow() + timedelta(seconds=10),
+                         duration_ms=10000, size_bytes=100)
+    src = tmp_path / str(c.id) / 'seg.ts'
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b'raw-hevc')
+    return seg, str(src)
+
+
+def test_ensure_hls_ts_prefers_encoder_offload(app_db, tmp_path, monkeypatch):
+    import server.service.encode_offload as eo
+    from server.view.api import playback as pb
+
+    seg, src = _hls_env(tmp_path)
+
+    def _offload(src_path, out_path):
+        with open(out_path, 'wb') as f:
+            f.write(b'OFFLOADED')
+        return True
+
+    monkeypatch.setattr(eo, 'transcode_segment', _offload)
+    monkeypatch.setattr(pb.subprocess, 'run',
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError('local ffmpeg must not run')))
+    out = pb._ensure_hls_ts(seg, src, transcode=True)
+    assert out and out.endswith('%s_h264.ts' % seg.id)
+    with open(out, 'rb') as f:
+        assert f.read() == b'OFFLOADED'
+
+
+def test_ensure_hls_ts_falls_back_to_local(app_db, tmp_path, monkeypatch):
+    import server.service.encode_offload as eo
+    from server.view.api import playback as pb
+
+    seg, src = _hls_env(tmp_path)
+    monkeypatch.setattr(eo, 'transcode_segment', lambda *a: False)   # offload unavailable
+
+    def _local_run(cmd, capture_output=True, timeout=None):
+        with open(cmd[-1], 'wb') as f:                               # -y <out> is last
+            f.write(b'LOCAL')
+        import types
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(pb.subprocess, 'run', _local_run)
+    out = pb._ensure_hls_ts(seg, src, transcode=True)
+    assert out and out.endswith('%s_h264.ts' % seg.id)
+    with open(out, 'rb') as f:
+        assert f.read() == b'LOCAL'

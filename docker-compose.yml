@@ -241,6 +241,36 @@ services:
       start_period: 20s
     networks: [axp-net]
 
+  # Encoder worker node — offloads live H.265→H.264 + playback segment transcode.
+  # Local instance of the same image a REMOTE encoder host runs (there set SERVER_API_URL
+  # to the backend's reachable URL, JOIN_TOKEN from the admin UI, and make sure the
+  # backend/worker GO2RTC_RTSP points at an address the node can reach).
+  axp-encoder:
+    build:
+      context: .
+      dockerfile: worker/encoder/Dockerfile
+    restart: unless-stopped
+    environment:
+      SERVER_API_URL: http://axp-backend:10000/api/v1
+      NODE_NAME: ${ENCODER_NODE_NAME:-encoder-local}
+      JOIN_TOKEN: ${ENCODER_JOIN_TOKEN:-}
+      NODE_TOKEN: ${ENCODER_NODE_TOKEN:-}
+      HWACCEL: ${ENCODER_HWACCEL:-none}
+      MAX_SESSIONS: ${ENCODER_MAX_SESSIONS:-4}
+      ADVERTISE_URL: http://axp-encoder:8098
+      ENCODE_CALLBACK_SECRET: ${ENCODE_CALLBACK_SECRET:-}
+      ENCODER_BIND: 0.0.0.0:8098
+    depends_on:
+      axp-go2rtc:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8098/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [axp-net]
+
   axp-frontend:
     build:
       context: ./frontend

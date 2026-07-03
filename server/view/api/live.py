@@ -19,8 +19,9 @@ from flask import Blueprint, Response, request, stream_with_context
 import config
 from server.model.camera import Camera
 from server.model.stream import Stream
-from server.service import live_ticket
+from server.service import live_activity, live_ticket
 from server.service.permission import PermissionService
+from server.service.reconcile import publish_reconcile
 from server.service.token import TokenService
 from server.view.response import ResponseBuilder
 
@@ -102,11 +103,25 @@ def _resolve(go2rtc_name: str):
     return (user, camera), None
 
 
+def _mark_activity(ctx, go2rtc_name):
+    """Viewer activity: gates the idle-stop of live transcodes. mark() feeds the
+    keep-warm/encoder gate; the reconcile publish wakes the recorder so a returning
+    viewer gets the warm consumer back within one tick instead of one poll."""
+    live_activity.mark(go2rtc_name)
+    publish_reconcile(camera_id=ctx[1].id if ctx else None, action='live_active')
+    try:
+        from server.service.encode_scheduler import kick
+        kick(ctx[1].id if ctx else None)
+    except Exception:
+        pass   # best-effort — offload assignment catches up on the next beat
+
+
 @context.route('/webrtc/<go2rtc_name>', methods=('POST',))
 def webrtc(go2rtc_name):
     ctx, err = _resolve(go2rtc_name)
     if err:
         return err
+    _mark_activity(ctx, go2rtc_name)
     try:
         upstream = requests.post(
             '%s/api/webrtc' % config.GO2RTC_URL, params={'src': go2rtc_name},
@@ -126,6 +141,7 @@ def mp4(go2rtc_name):
     ctx, err = _resolve(go2rtc_name)
     if err:
         return err
+    _mark_activity(ctx, go2rtc_name)
     try:
         upstream = requests.get('%s/api/stream.mp4' % config.GO2RTC_URL,
                                 params={'src': go2rtc_name}, stream=True, timeout=15)
@@ -145,6 +161,7 @@ def ws_ticket(go2rtc_name):
     ctx, err = _resolve(go2rtc_name)
     if err:
         return err
+    _mark_activity(ctx, go2rtc_name)
     return ResponseBuilder.success(live_ticket.issue(go2rtc_name))
 
 

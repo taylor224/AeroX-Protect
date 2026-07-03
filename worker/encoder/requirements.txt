@@ -1,0 +1,5 @@
+# Encoder node runtime: node agent (join/heartbeat/assignments) + /transcode HTTP server.
+# ffmpeg comes from the image (Dockerfile), not pip.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1

@@ -62,6 +62,7 @@ PERMISSION_CATALOG: list[tuple[str, str, str]] = [
     ('ai', 'read', 'AI 설정 조회'),
     ('ai', 'update', 'AI 설정 수정'),
     ('ai_nodes', 'manage', 'AI 노드 관리'),
+    ('encoding_nodes', 'manage', '인코딩 노드 관리'),
     # P5 (rules / monitors / notifications / api)
     ('rules', 'read', '규칙 조회'),
     ('rules', 'create', '규칙 생성'),

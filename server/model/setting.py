@@ -11,6 +11,7 @@ SETTING_SEEDS: list[tuple[str, object, str]] = [
     ('gpu_enabled', False, '전역 GPU 사용 (P4에서 ai_settings로 이관)'),
     ('timezone', 'Asia/Seoul', '표시 시간대'),
     ('retention_default_days', 30, '기본 보존 기간(일)'),
+    ('live_transcode_idle_s', 300, '라이브 트랜스코드 유휴 정지 시간(초); 0=항상 예열'),
 ]
 
 

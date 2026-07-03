@@ -20,6 +20,8 @@ from server.view.api import (
     detection_zone,
     discovery,
     edge_recording,
+    encode_ingest,
+    encode_node,
     event,
     event_policy,
     export,
@@ -85,6 +87,9 @@ blueprint_list = [
     ai_assignment.context,
     ai_settings.context,
     ai_ingest.context,
+    # encoder worker nodes
+    encode_node.context,
+    encode_ingest.context,
     # P5
     flow.context,
     action_target.context,

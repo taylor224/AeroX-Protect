@@ -468,10 +468,19 @@ class RecorderSupervisor:
         return stream if live_transcode_enabled(cam, stream) else None
 
     def _tick_warm(self):
+        from server.service import live_activity
+        window = live_activity.idle_window()
         warm: dict[int, Camera] = {}
         for cam in Camera.get_all_enabled():
-            if self._warm_stream(cam) is not None:
-                warm[cam.id] = cam
+            stream = self._warm_stream(cam)
+            if stream is None:
+                continue
+            self._refresh_viewer_activity(cam, stream, window)
+            if not live_activity.is_active(stream.go2rtc_name, window):
+                continue   # idle → drop from warm; go2rtc then stops the transcode itself
+            if self._encode_offloaded(cam):
+                continue   # an encoder node publishes H.264 for this camera; nothing local to warm
+            warm[cam.id] = cam
         for cid in list(self.warm_procs):
             if cid not in warm:
                 self._stop_warm(cid)
@@ -481,6 +490,31 @@ class RecorderSupervisor:
                 self._start_warm(cam)
             elif proc.popen.poll() is not None:
                 self._on_dead_warm(cam, proc)
+
+    def _refresh_viewer_activity(self, cam: Camera, stream, window: int):
+        """Re-mark activity while go2rtc reports a real viewer — long watches never
+        re-issue tickets. The keep-warm proc itself is a consumer of the same stream,
+        so it is excluded from the count."""
+        if window <= 0:
+            return
+        from server.driver.go2rtc import Go2rtcDriver
+        from server.service import live_activity
+        try:
+            status = Go2rtcDriver().stream_status(stream.go2rtc_name)
+            self_consumers = 1 if cam.id in self.warm_procs else 0
+            if (status.get('consumers') or 0) - self_consumers > 0:
+                live_activity.mark(stream.go2rtc_name, window)
+        except Exception as e:
+            logger.debug('viewer poll failed camera=%s: %s', cam.id, e)
+
+    @staticmethod
+    def _encode_offloaded(cam: Camera) -> bool:
+        """Whether an encoder node currently owns this camera's live transcode."""
+        try:
+            from server.service.encode_offload import live_offload_target
+            return live_offload_target(cam) is not None
+        except Exception:
+            return False
 
     def _start_warm(self, cam: Camera):
         now = time.monotonic()

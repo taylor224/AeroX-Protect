@@ -810,5 +810,12 @@
   "error.forbidden.title": "Access denied",
   "error.forbidden.desc": "You don't have permission to view this page.",
   "error.notfound.title": "Page not found",
-  "error.back_home": "Back home"
+  "error.back_home": "Back home",
+  "ai.tab.encoders": "Encoders",
+  "enc.nodes": "Encoding nodes",
+  "enc.subtitle": "Offload live (H.265→H.264) and playback transcoding to separate encoder servers. Cameras nobody watches stop encoding automatically.",
+  "enc.no_assignments": "No assignments. (Only actively-watched transcode cameras are assigned)",
+  "settings.saved": "Settings saved.",
+  "settings.live_idle": "Live transcode idle stop (seconds)",
+  "settings.live_idle.desc": "Stop H.264 live encoding after this long without a viewer. 0 = keep always warm."
 }
