@@ -15,11 +15,18 @@ on:
         description: 'Version to build (without leading v)'
         required: true
 
+permissions:
+  contents: write   # gh release create/upload with the default GITHUB_TOKEN
+
 jobs:
   bundle:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
       - name: Resolve version
         id: ver
@@ -73,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
-          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" `
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
             /DAppVersion=${{ steps.ver.outputs.version }} `
             /DPayloadDir=..\..\build\payload `
             /O..\..\build\dist `
