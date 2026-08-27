@@ -17,8 +17,10 @@ $Pins = @(
     @{ Name = 'python';  Version = '3.13.7'
        Url = 'https://www.nuget.org/api/v2/package/python/3.13.7'
        Sha256 = 'SKIP'; Kind = 'nupkg' }
-    @{ Name = 'ffmpeg';  Version = '7.1'
-       Url = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.1-essentials_build.zip'
+    # gyan.dev prunes old versions from /packages/ — the GyanD GitHub mirror keeps
+    # every release, so pin there.
+    @{ Name = 'ffmpeg';  Version = '9.0.1'
+       Url = 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-essentials_build.zip'
        Sha256 = 'SKIP'; Kind = 'zip' }
     @{ Name = 'go2rtc';  Version = '1.9.4'
        Url = 'https://github.com/AlexxIT/go2rtc/releases/download/v1.9.4/go2rtc_win64.zip'
@@ -31,8 +33,8 @@ $Pins = @(
     @{ Name = 'redis';   Version = '7.4.2'
        Url = 'https://github.com/redis-windows/redis-windows/releases/download/7.4.2/Redis-7.4.2-Windows-x64-msys2.zip'
        Sha256 = 'SKIP'; Kind = 'zip' }
-    @{ Name = 'mariadb'; Version = '11.8.4'
-       Url = 'https://archive.mariadb.org/mariadb-11.8.4/winx64-packages/mariadb-11.8.4-winx64.zip'
+    @{ Name = 'mariadb'; Version = '11.8.9'   # newest 11.8 LTS patch
+       Url = 'https://archive.mariadb.org/mariadb-11.8.9/winx64-packages/mariadb-11.8.9-winx64.zip'
        Sha256 = 'SKIP'; Kind = 'zip' }
     @{ Name = 'winsw';   Version = '2.12.0'
        Url = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
