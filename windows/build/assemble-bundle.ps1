@@ -27,10 +27,10 @@ if (-not (Test-Path "$FrontendDist\index.html")) { throw "frontend dist missing 
 if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
 New-Item -ItemType Directory -Force -Path $Stage, $OutDir | Out-Null
 
-# ── site-packages (cp313 win_amd64 wheels only — no source builds) ───────────
+# ── site-packages (wheels only, except the two pure-Python sdist-only deps) ──
 & $Py -m pip install --upgrade pip --quiet
-& $Py -m pip install --only-binary=:all: --target "$Stage\site-packages" `
-    -r "$Repo\windows\requirements-win.txt"
+& $Py -m pip install --only-binary=:all: --no-binary onvif-zeep,wsdiscovery `
+    --target "$Stage\site-packages" -r "$Repo\windows\requirements-win.txt"
 if ($LASTEXITCODE -ne 0) { throw 'pip install failed (a dep has no Windows wheel?)' }
 
 # ── app source ───────────────────────────────────────────────────────────────
