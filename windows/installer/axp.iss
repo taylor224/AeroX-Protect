@@ -34,7 +34,8 @@ WizardStyle=modern
 UninstallDisplayName=AeroXProtect NVR
 
 [Languages]
-Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+; Korean.isl is not shipped with stock Inno Setup (unofficial translation) — add it
+; to the repo and reference it here if a Korean installer UI is wanted.
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]

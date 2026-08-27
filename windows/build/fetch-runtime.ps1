@@ -84,6 +84,14 @@ if ($ffNested -and (Test-Path (Join-Path $ffNested.FullName 'bin'))) {
     Move-Item (Join-Path $ffNested.FullName '*') (Join-Path $OutDir 'ffmpeg')
     Remove-Item -Recurse -Force $ffNested.FullName
 }
+# redis: some builds nest a single folder — flatten to redis\redis-server.exe
+$rdRoot = Join-Path $OutDir 'redis'
+if (-not (Test-Path (Join-Path $rdRoot 'redis-server.exe'))) {
+    $rdNested = Get-ChildItem -Recurse $rdRoot -Filter 'redis-server.exe' | Select-Object -First 1
+    if ($rdNested) {
+        Move-Item (Join-Path $rdNested.DirectoryName '*') $rdRoot -Force
+    }
+}
 # mariadb: nests mariadb-<v>-winx64\ — flatten, then trim what the NVR never uses
 $mdNested = Get-ChildItem -Directory (Join-Path $OutDir 'mariadb') | Select-Object -First 1
 if ($mdNested -and (Test-Path (Join-Path $mdNested.FullName 'bin'))) {
