@@ -62,6 +62,139 @@ single Docker stack. Product name **AeroXProtect**, code namespace **axp**.
 - **Fail-closed in production** — refuses to boot if `SECRET_KEY` / `JWT_SECRET` /
   `CREDENTIAL_ENC_KEY` are left at insecure defaults.
 
+## UI tour
+
+Screenshots taken from a running instance (Korean locale; every label is i18n-ed, with
+English included).
+
+### Login
+
+JWT session login. The first admin account is bootstrapped from `BOOTSTRAP_ADMIN_*` env.
+
+![Login](docs/screenshots/login.png)
+
+### Live
+
+The home page: a multi-camera live wall backed by go2rtc (MSE-first with WebRTC/fMP4
+fallback, automatic H.265→H.264 transcode). Grid layouts are saved as dashboards with
+multi-page rotation; tiles support enlarge-in-place, per-tile HD/SD stream selection, PTZ,
+talk-back, and fisheye dewarp.
+
+![Live](docs/screenshots/live.png)
+
+### Events & playback
+
+Recording browser merged with the event feed: pick a camera, get a gap-aware timeline with
+event markers, filterable by event type (motion, line-cross, intrusion, tamper, object) and
+date range. Playback is segment-chained MP4 over hls.js with on-demand transcode; bookmarks,
+manual recording, and clip export live here too.
+
+![Events](docs/screenshots/events.png)
+
+### Cameras
+
+Camera inventory and onboarding — ONVIF / Hikvision (ISAPI) / Hanwha (SUNAPI) drivers,
+WS-Discovery LAN scan, batch add, per-camera streams, privacy masks, AI settings, firmware
+info, and encrypted credential storage.
+
+![Cameras](docs/screenshots/cameras.png)
+
+### Storage
+
+Recording disk pool: discovered disks can be added to the pool, usage and health are
+monitored (S.M.A.R.T./RAID guide included), and per-camera retention policies control
+rotation.
+
+![Storage](docs/screenshots/storage.png)
+
+### Archive
+
+Long-term archiving of recordings to local / S3 / SMB targets with per-job tracking.
+
+![Archive](docs/screenshots/archive.png)
+
+### Maps
+
+Camera placement on a geographic map (Leaflet — OpenStreetMap by default, Google Map Tiles
+optional). Multiple named maps with camera markers that deep-link to live view.
+
+![Maps](docs/screenshots/maps.png)
+
+### Monitors (kiosk)
+
+Unattended wall displays: pair a monitor once with a code, and it gets a scoped token that
+can only render its assigned dashboard (`/monitor`).
+
+![Monitors](docs/screenshots/monitors.png)
+
+### Automation — visual flows
+
+n8n-style flow list with per-flow enable toggles and run history. Flows replace a classic
+rule engine: trigger → condition → action graphs.
+
+![Automation](docs/screenshots/automation.png)
+
+The editor is a node canvas (@xyflow/react + elk auto-layout): trigger sources, if/else
+conditions, delay, and action nodes (push, email, SMS, webhook, record, camera on/off,
+speaker, IO) wired through ok/err and true/false branches, with `{{trigger.*}} / {{nodes.*}}`
+templating and run replay overlaid on the graph.
+
+![Flow editor](docs/screenshots/flow-editor.png)
+
+### AI
+
+Per-camera AI toolbox: object search over detections, detection zone editor, object
+triggers, counting/loitering lines, audio classification, global detector settings, and
+distributed inference node management.
+
+![AI](docs/screenshots/ai.png)
+
+### Smart search
+
+Free-text semantic search over recorded detections (CLIP embeddings when a model is
+available, text fallback otherwise), with index refresh.
+
+![Search](docs/screenshots/search.png)
+
+### LPR
+
+License plate reads per camera with search, plus a plate watchlist (block/allow labels)
+that raises events on match.
+
+![LPR](docs/screenshots/lpr.png)
+
+### Faces
+
+Consent-based face identity registry: recent face detections, enrolled people management,
+cosine matching, and one-click erasure of a person's embeddings.
+
+![Faces](docs/screenshots/faces.png)
+
+### Access control
+
+Doors and credentials with an access log (granted/denied and reason), door relock handling,
+and security alerts.
+
+![Access control](docs/screenshots/access.png)
+
+### Users
+
+User management with roles and RBAC permissions, account state, and last-login audit.
+
+![Users](docs/screenshots/users.png)
+
+### Settings
+
+System settings: timezone, default UI language, external share URL, WebRTC LAN IP, map
+provider, SMS (Twilio), remote-portal TURN, feature flags, and more.
+
+![Settings](docs/screenshots/settings.png)
+
+### Federation (flag-gated)
+
+A hub NVR can aggregate cameras and events from member NVRs over their external API
+(`/federation`, off by default behind the `federation` feature flag).
+
 ## Stack
 
 | Layer | Tech |
