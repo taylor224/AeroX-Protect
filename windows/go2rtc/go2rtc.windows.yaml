@@ -1,0 +1,16 @@
+# AeroXProtect bundled go2rtc — copied to config\go2rtc.yaml by the installer.
+# Streams are registered at runtime by the backend via the REST API (PUT /api/streams);
+# after a go2rtc restart the camera_health task re-registers everything automatically.
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+webrtc:
+  listen: ":8555"
+  candidates:
+    - stun:8555
+
+log:
+  level: info

@@ -4,9 +4,26 @@ All commands are arg lists (shell=False) built from server-side values only — 
 user input is ever interpolated into ffmpeg args (PLAN §13 security).
 """
 import json
+import os
 import subprocess
 
 import config
+
+
+def concat_entry(abs_path: str) -> str:
+    """One `file '…'` line for an ffmpeg concat list. The concat demuxer treats
+    backslashes as escapes inside the quoted path (Windows paths would mangle:
+    \\a, \\1, …), and Win32 accepts forward slashes — so normalize separators and
+    escape single quotes."""
+    p = abs_path.replace('\\', '/').replace("'", r"'\''")
+    return "file '%s'\n" % p
+
+
+def escape_filter_path(path: str) -> str:
+    """Escape a filesystem path for use inside an ffmpeg filtergraph option value
+    (e.g. drawtext fontfile=…): `\\` → `/`, and `:` (option separator, appears in
+    Windows drive letters) → `\\:`."""
+    return path.replace('\\', '/').replace(':', r'\:')
 
 
 def restream_url(go2rtc_name: str) -> str:
@@ -136,7 +153,9 @@ def build_transcode_cmd(list_file: str, out_path: str, start_trim: float, end_tr
 
 # P6 R3 — burned-in watermark (drawtext, libfreetype). Watermark text is user input, so it
 # is whitelisted to a safe charset before being single-quoted into the filtergraph (§13).
-WATERMARK_FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+WATERMARK_FONT = os.getenv('AXP_WATERMARK_FONT') or (
+    'C:/Windows/Fonts/arial.ttf' if os.name == 'nt'
+    else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
 
 
 def safe_watermark_text(text: str | None) -> str:
@@ -151,7 +170,7 @@ def build_watermark_transcode_cmd(list_file: str, out_path: str, start_trim: flo
     vf = (
         "scale=-2:%d,drawtext=fontfile=%s:text='%s':fontcolor=white@0.92:fontsize=20:"
         "box=1:boxcolor=black@0.4:boxborderw=6:x=14:y=14:expansion=none"
-        % (scale_height, WATERMARK_FONT, safe)
+        % (scale_height, escape_filter_path(WATERMARK_FONT), safe)
     )
     return [
         config.FFMPEG_BIN, '-hide_banner', '-loglevel', 'error', *_hwaccel_prefix(),

@@ -14,6 +14,19 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': { target: 'http://localhost:10000', changeOrigin: true },
+      // MSE live WS (nginx/Caddy proxies this to go2rtc after ticket auth in prod)
+      '/live-ws': {
+        target: 'http://localhost:1984',
+        ws: true,
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/live-ws\/?/, '/api/ws'),
+      },
+      // native-install launcher control API (update progress polling)
+      '/updater': {
+        target: 'http://localhost:10099',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/updater/, ''),
+      },
     },
   },
   preview: { host: true, port: 3000 },

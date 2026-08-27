@@ -176,7 +176,11 @@ def ws_auth():
     ticket = request.args.get('ticket') or request.headers.get('X-Live-Ticket')
     if not (src and ticket):
         from urllib.parse import parse_qs, urlsplit
-        qs = parse_qs(urlsplit(request.headers.get('X-Original-URI', '')).query)
+        # nginx forwards the original request line as X-Original-URI; Caddy's
+        # forward_auth sends X-Forwarded-Uri. Accept either (proxy-agnostic).
+        original = (request.headers.get('X-Original-URI')
+                    or request.headers.get('X-Forwarded-Uri', ''))
+        qs = parse_qs(urlsplit(original).query)
         src = src or (qs.get('src') or [None])[0]
         ticket = ticket or (qs.get('ticket') or [None])[0]
     if src and ticket and live_ticket.verify(src, ticket):

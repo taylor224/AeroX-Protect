@@ -1,0 +1,12 @@
+# AeroXProtect bundled Redis — rendered to config\redis.conf by the installer.
+# __AXP_HOME__ is replaced with the install root. Loopback-only on 6380.
+bind 127.0.0.1
+port 6380
+protected-mode yes
+dir __AXP_HOME__/data/redis
+appendonly yes
+appendfsync everysec
+maxmemory 512mb
+maxmemory-policy noeviction
+save ""
+logfile __AXP_HOME__/data/logs/redis.log

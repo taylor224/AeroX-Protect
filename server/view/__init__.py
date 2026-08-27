@@ -49,6 +49,7 @@ from server.view.api import (
     snapshot,
     storage,
     subscription,
+    system,
     talk,
     timelapse,
 )
@@ -118,6 +119,7 @@ blueprint_list = [
     portal.context,
     access.context,
     general_settings.context,
+    system.context,
 ]
 
 for blueprint in blueprint_list:

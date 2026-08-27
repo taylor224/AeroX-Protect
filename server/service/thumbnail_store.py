@@ -7,6 +7,7 @@ import logging
 import os
 
 import config
+from server.util.fileops import atomic_replace
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def save(camera_uuid: str, jpeg: bytes) -> None:
         tmp = '%s.tmp' % path
         with open(tmp, 'wb') as f:
             f.write(jpeg)
-        os.replace(tmp, path)            # atomic swap — readers never see a half-written file
+        atomic_replace(tmp, path)        # atomic swap — readers never see a half-written file
     except OSError as e:
         logger.warning('thumbnail persist failed for %s: %s', camera_uuid, e)
 
