@@ -20,7 +20,11 @@ type Tab = 'search' | 'zones' | 'triggers' | 'counting' | 'audio' | 'settings' |
 export function AiPage() {
   const intl = useIntl();
   const { hasPermission } = useAuthContext();
-  const countingEnabled = useFeatureFlag('object_counting') || useFeatureFlag('loitering');
+  // Both hooks must run unconditionally — `a || b` skips the second call once the
+  // first flag turns on, changing the hook count between renders (React #310/#311).
+  const objectCountingEnabled = useFeatureFlag('object_counting');
+  const loiteringEnabled = useFeatureFlag('loitering');
+  const countingEnabled = objectCountingEnabled || loiteringEnabled;
   const audioEnabled = useFeatureFlag('audio_detection');
   const encodersEnabled = useFeatureFlag('encoding_nodes');
   const [tab, setTab] = useState<Tab>('search');
