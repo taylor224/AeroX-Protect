@@ -82,11 +82,15 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
+          # absolute paths: /O resolves against the CWD (not the script dir), which
+          # silently dropped Setup.exe outside the repo on the first release run
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
             /DAppVersion=${{ steps.ver.outputs.version }} `
-            /DPayloadDir=..\..\build\payload `
-            /O..\..\build\dist `
+            "/DPayloadDir=$PWD\build\payload" `
+            "/O$PWD\build\dist" `
             windows\installer\axp.iss
+          $setup = "build\dist\AeroXProtect-Setup-v${{ steps.ver.outputs.version }}.exe"
+          if (-not (Test-Path $setup)) { throw "installer missing: $setup" }
 
       - name: Refresh SHA256SUMS (installer included)
         shell: pwsh
