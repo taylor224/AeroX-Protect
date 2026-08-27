@@ -1,0 +1,19 @@
+# AeroXProtect bundled MariaDB — rendered to config\my.ini by the installer.
+# __AXP_HOME__ is replaced with the install root (e.g. C:\AeroXProtect).
+# Loopback-only on 3307 so a host MySQL/MariaDB on 3306 never collides.
+[mysqld]
+datadir=__AXP_HOME__/data/mariadb
+port=3307
+bind-address=127.0.0.1
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+default-time-zone=+00:00
+max_connections=200
+innodb_buffer_pool_size=256M
+innodb_flush_log_at_trx_commit=2
+skip-name-resolve
+log_error=__AXP_HOME__/data/logs/mariadb-error.log
+
+[client]
+port=3307
+default-character-set=utf8mb4

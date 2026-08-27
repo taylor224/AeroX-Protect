@@ -19,6 +19,7 @@ from server.model.segment import Segment
 from server.service import ffmpeg, playback_planner, storage_manager
 from server.service.permission import PermissionService
 from server.service.token import TokenService
+from server.util.fileops import atomic_replace
 from server.view.errors import map_errors
 from server.view.response import ResponseBuilder
 
@@ -157,7 +158,7 @@ def _ensure_hls_ts(seg: Segment, src_path: str, transcode: bool) -> str | None:
             except OSError:
                 pass
             return None
-        os.replace(tmp, out)   # atomic — concurrent requests never read a partial file
+        atomic_replace(tmp, out)   # atomic — concurrent requests never read a partial file
         return out
     except (subprocess.SubprocessError, OSError):
         try:

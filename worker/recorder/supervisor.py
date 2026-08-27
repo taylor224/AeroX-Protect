@@ -7,7 +7,6 @@ lost. Health (state/pid/last_segment/restart_count) is upserted to recorder_heal
 """
 import logging
 import os
-import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -15,6 +14,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import or_
 
 import config
+from worker.procutil import graceful_stop, spawn
 from server.model import db, utcnow
 from server.model.camera import Camera
 from server.model.recorder_health import (
@@ -196,8 +196,8 @@ class RecorderSupervisor:
 
         try:
             log_path = os.path.join(output_dir, 'ffmpeg.log')
-            with open(log_path, 'ab') as log_fh:     # child dups the fd; parent copy closes here
-                popen = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=log_fh)
+            with self._open_log(log_path) as log_fh:  # child dups the fd; parent copy closes here
+                popen = spawn(cmd, stdout=subprocess.DEVNULL, stderr=log_fh)
         except OSError as e:
             self._set_health(cam.id, STATE_ERROR, error='spawn_failed: %s' % e)
             return
@@ -214,15 +214,8 @@ class RecorderSupervisor:
 
     def _stop(self, camera_id: int):
         proc = self.procs.pop(camera_id, None)
-        if proc and proc.popen.poll() is None:
-            try:
-                proc.popen.send_signal(signal.SIGINT)   # flush current segment
-                proc.popen.wait(timeout=5)
-            except (subprocess.TimeoutExpired, OSError):
-                try:
-                    proc.popen.kill()
-                except OSError:
-                    pass
+        if proc:
+            graceful_stop(proc.popen, timeout=5)   # flush current segment
         if proc and proc.last_disk is not None:
             # ffmpeg has exited — index the flushed final segment (normally skipped as
             # "newest = in-progress"); without this the last ~segment before a stop is lost
@@ -288,6 +281,17 @@ class RecorderSupervisor:
                          last_segment_at=proc.last_db_segment_at, restart_count=proc.restart_count)
 
     # ── helpers ───────────────────────────────────────────────────────────────
+    @staticmethod
+    def _open_log(path: str, max_bytes: int = 32 * 1024 * 1024):
+        """Per-camera ffmpeg.log, append mode, rotated once past max_bytes (the
+        append-only file otherwise grows unbounded over months of restarts)."""
+        try:
+            if os.path.getsize(path) > max_bytes:
+                os.replace(path, path + '.1')
+        except OSError:
+            pass
+        return open(path, 'ab')
+
     @staticmethod
     def _record_stream(cam: Camera):
         streams = cam.streams
@@ -374,8 +378,8 @@ class RecorderSupervisor:
                                        seg_seconds, container, video_codec=getattr(stream, 'codec', None))
 
         try:
-            with open(os.path.join(output_dir, 'ffmpeg.log'), 'ab') as log_fh:
-                popen = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=log_fh)
+            with self._open_log(os.path.join(output_dir, 'ffmpeg.log')) as log_fh:
+                popen = spawn(cmd, stdout=subprocess.DEVNULL, stderr=log_fh)
         except OSError as e:
             logger.warning('sub recorder spawn failed camera=%s: %s', cam.id, e)
             return
@@ -391,15 +395,8 @@ class RecorderSupervisor:
 
     def _stop_sub(self, camera_id: int):
         proc = self.sub_procs.pop(camera_id, None)
-        if proc and proc.popen.poll() is None:
-            try:
-                proc.popen.send_signal(signal.SIGINT)   # flush current segment
-                proc.popen.wait(timeout=5)
-            except (subprocess.TimeoutExpired, OSError):
-                try:
-                    proc.popen.kill()
-                except OSError:
-                    pass
+        if proc:
+            graceful_stop(proc.popen, timeout=5)   # flush current segment
         if proc and proc.last_disk is not None:
             try:
                 segment_indexer.index_camera_dir(camera_id, proc.last_disk, proc.container,
@@ -526,7 +523,7 @@ class RecorderSupervisor:
             return
         cmd = ffmpeg.build_keepwarm_cmd(ffmpeg.restream_url(stream.go2rtc_name))
         try:
-            popen = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            popen = spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError as e:
             logger.warning('keepwarm spawn failed camera=%s: %s', cam.id, e)
             return
@@ -540,15 +537,8 @@ class RecorderSupervisor:
 
     def _stop_warm(self, camera_id: int):
         proc = self.warm_procs.pop(camera_id, None)
-        if proc and proc.popen.poll() is None:
-            try:
-                proc.popen.send_signal(signal.SIGINT)
-                proc.popen.wait(timeout=5)
-            except (subprocess.TimeoutExpired, OSError):
-                try:
-                    proc.popen.kill()
-                except OSError:
-                    pass
+        if proc:
+            graceful_stop(proc.popen, timeout=5)
         logger.info('keepwarm stopped camera=%s', camera_id)
 
     def _on_dead_warm(self, cam: Camera, proc: Proc):

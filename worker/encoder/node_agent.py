@@ -7,11 +7,11 @@ rendition back over RTSP. Heartbeats report only sessions that stayed up MIN_HEA
 the server flips the viewer-facing source to the published stream only after that report,
 so a failing publish never blacks out live (the local transcode keeps serving)."""
 import logging
-import signal
 import subprocess
 import time
 
 from worker.encoder import config
+from worker.procutil import graceful_stop, spawn
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class EncodeSession:
             logger.warning('rejected encode spec cam=%s (validation failed)', self.spec.get('camera_id'))
             return
         try:
-            self.popen = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.popen = spawn(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.started_at = time.monotonic()
             logger.info('encode session started cam=%s pid=%s', self.spec.get('camera_id'), self.popen.pid)
         except OSError as e:
@@ -98,15 +98,7 @@ class EncodeSession:
 
     def stop(self):
         p, self.popen = self.popen, None
-        if p is not None and p.poll() is None:
-            try:
-                p.send_signal(signal.SIGINT)
-                p.wait(timeout=5)
-            except (subprocess.TimeoutExpired, OSError):
-                try:
-                    p.kill()
-                except OSError:
-                    pass
+        graceful_stop(p, timeout=5)
         logger.info('encode session stopped cam=%s', self.spec.get('camera_id'))
 
 

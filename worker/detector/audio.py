@@ -22,8 +22,9 @@ _DROP_LABELS = {'ambient'}     # ambient/below-floor never reported
 
 def build_ffmpeg_cmd(rtsp_url: str) -> list[str]:
     """ffmpeg → mono 16 kHz s16le PCM on stdout (no video)."""
+    from worker.detector import config as det_config
     return [
-        'ffmpeg', '-loglevel', 'error', '-rtsp_transport', 'tcp', '-i', rtsp_url,
+        det_config.FFMPEG_BIN, '-loglevel', 'error', '-rtsp_transport', 'tcp', '-i', rtsp_url,
         '-vn', '-ac', '1', '-ar', str(SAMPLE_RATE), '-f', 's16le', '-',
     ]
 

@@ -65,7 +65,7 @@ def run_timelapse(job_id):
                     continue
                 seg_abs = storage_manager.abs_path(seg_disk, seg.rel_path)
                 if os.path.exists(seg_abs):
-                    f.write("file '%s'\n" % seg_abs.replace("'", "'\\''"))
+                    f.write(ffmpeg.concat_entry(seg_abs))
 
         source_seconds = max(1.0, (job.range_end_ts - job.range_start_ts).total_seconds())
         params = job.params or {}

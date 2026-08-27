@@ -1,7 +1,9 @@
-"""CLI entrypoints (poetry scripts): migrate / seed / seed-admin.
+"""CLI entrypoints (poetry scripts): db-upgrade / migrate / seed / seed-admin.
 
 Usage:
-    poetry run migrate       # create schema tables from models
+    poetry run db-upgrade    # versioned schema path: create-all+baseline on fresh,
+                             # baseline-mark pre-runner DBs, apply pending migrations/*.sql
+    poetry run migrate       # legacy: create schema tables from models only
     poetry run seed          # seed roles, permission catalog, settings (idempotent)
     poetry run seed-admin    # create first admin from BOOTSTRAP_ADMIN_* (if no users)
 """
@@ -19,6 +21,19 @@ def migrate():
     _ensure_db()
     db.create_all()
     print('[migrate] tables created on schema `%s`.' % config.DATABASE_DB)
+
+
+def db_upgrade():
+    """Versioned schema upgrade (see server/service/db_migrate.py)."""
+    from server.service import db_migrate
+
+    def _create_all():
+        _ensure_db()
+        db.create_all()
+
+    result = db_migrate.upgrade(create_all_fn=_create_all)
+    print('[db-upgrade] mode=%s baselined=%d applied=%s' % (
+        result['mode'], len(result['baselined']), result['applied'] or '-'))
 
 
 def seed():
@@ -142,4 +157,5 @@ if __name__ == '__main__':
     import sys
 
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'migrate'
-    {'migrate': migrate, 'seed': seed, 'seed-admin': seed_admin}.get(cmd, migrate)()
+    {'migrate': migrate, 'db-upgrade': db_upgrade, 'seed': seed,
+     'seed-admin': seed_admin}.get(cmd, migrate)()

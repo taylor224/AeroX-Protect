@@ -1,0 +1,104 @@
+# Builds the Windows-native release artifacts on every v* tag:
+#   AeroXProtect-Setup-v<ver>.exe             (full installer)
+#   aeroxprotect-windows-x64-app-v<ver>.zip   (auto-update payload)
+#   manifest-v<ver>.json + SHA256SUMS
+# and attaches them to the GitHub Release (public — the launcher's update check
+# hits /releases/latest unauthenticated).
+name: windows-bundle
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (without leading v)'
+        required: true
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = if ('${{ github.event_name }}' -eq 'push') { '${{ github.ref_name }}'.TrimStart('v') }
+               else { '${{ inputs.version }}' }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Wheel availability gate (every dep must have a cp313/pure wheel)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip download --only-binary=:all: --dest wheelcheck `
+            -r windows\requirements-win.txt
+        env:
+          PIP_PYTHON_VERSION_WARNING: '1'
+
+      - name: Build frontend
+        shell: pwsh
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+        env:
+          VITE_APP_API_URL: /api/v1
+          VITE_APP_NAME: axp
+          VITE_APP_VERSION: ${{ steps.ver.outputs.version }}
+
+      - name: Fetch pinned runtime binaries
+        shell: pwsh
+        run: windows\build\fetch-runtime.ps1 -OutDir build\runtime
+
+      - name: Assemble app bundle + manifest
+        shell: pwsh
+        run: |
+          windows\build\assemble-bundle.ps1 -Version ${{ steps.ver.outputs.version }} `
+            -RuntimeDir build\runtime -OutDir build\dist
+
+      - name: Stage installer payload
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build\payload | Out-Null
+          Move-Item build\runtime\winsw build\payload\winsw
+          Move-Item build\runtime build\payload\runtime
+          New-Item -ItemType Directory -Force build\payload\app | Out-Null
+          Expand-Archive build\dist\aeroxprotect-windows-x64-app-v${{ steps.ver.outputs.version }}.zip `
+            -DestinationPath build\payload\app
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=${{ steps.ver.outputs.version }} `
+            /DPayloadDir=..\..\build\payload `
+            /O..\..\build\dist `
+            windows\installer\axp.iss
+
+      - name: Refresh SHA256SUMS (installer included)
+        shell: pwsh
+        run: |
+          $out = 'build\dist\SHA256SUMS'
+          Get-ChildItem build\dist -File | Where-Object Name -ne 'SHA256SUMS' | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower(), $_.Name
+          } | Set-Content $out -Encoding ascii
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundle-v${{ steps.ver.outputs.version }}
+          path: build/dist/*
+
+      - name: Attach to GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create v${{ steps.ver.outputs.version }} --generate-notes 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host 'release exists' }
+          gh release upload v${{ steps.ver.outputs.version }} (Get-ChildItem build\dist -File).FullName --clobber
