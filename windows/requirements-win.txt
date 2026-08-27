@@ -1,0 +1,29 @@
+# Windows bundle Python deps — pyproject.toml runtime deps (minus uwsgi, which has
+# no Windows build) + waitress (WSGI server) + the encoder/detector node runtime.
+# Versions mirror pyproject.toml / worker/*/requirements.txt; CI verifies every
+# entry resolves to a cp313 win_amd64 (or pure) wheel before assembling a bundle.
+flask==3.1.2
+sqlalchemy==2.0.45
+pymysql==1.1.2
+redis==7.1.0
+celery==5.6.0
+flask_cors==6.0.2
+sentry-sdk==2.48.0
+argon2-cffi==25.1.0
+cryptography==46.0.4
+pyjwt==2.10.1
+python-dateutil==2.9.0
+requests==2.32.5
+onvif-zeep==0.2.12
+WSDiscovery==2.1.0
+psutil==6.1.1
+watchdog==6.0.0
+pyzipper>=0.3.6,<0.4.0
+boto3>=1.34.0,<2.0.0
+smbprotocol>=1.12.0,<2.0.0
+waitress>=3.0.2,<4.0.0
+
+# encoder / detector node runtime (worker/*/requirements.txt)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1

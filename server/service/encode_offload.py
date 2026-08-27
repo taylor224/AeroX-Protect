@@ -15,6 +15,7 @@ import logging
 import os
 
 import config
+from server.util.fileops import atomic_replace
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def transcode_segment(src_path: str, out_path: str) -> bool:
         tmp = '%s.enc.%d' % (out_path, os.getpid())
         with open(tmp, 'wb') as f:
             f.write(resp.content)
-        os.replace(tmp, out_path)   # atomic — same semantics as the local path
+        atomic_replace(tmp, out_path)   # atomic — same semantics as the local path
         return True
     except Exception as e:
         logger.debug('encode offload failed (falling back local) node=%s: %s', node.id, e)

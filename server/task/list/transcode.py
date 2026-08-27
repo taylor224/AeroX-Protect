@@ -78,7 +78,7 @@ def run_export_job(job_id):
                     continue
                 seg_abs = storage_manager.abs_path(seg_disk, seg.rel_path)
                 if os.path.exists(seg_abs) and os.path.getsize(seg_abs) > 0:
-                    f.write("file '%s'\n" % seg_abs.replace("'", "'\\''"))
+                    f.write(ffmpeg.concat_entry(seg_abs))
                     included.append(seg)
 
         if not included:

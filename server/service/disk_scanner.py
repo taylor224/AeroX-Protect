@@ -12,7 +12,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_REAL_FS = {'ext4', 'ext3', 'ext2', 'xfs', 'btrfs', 'zfs', 'f2fs', 'apfs'}
+_REAL_FS = {'ext4', 'ext3', 'ext2', 'xfs', 'btrfs', 'zfs', 'f2fs', 'apfs', 'ntfs', 'refs'}
 
 
 def _registered_mounts() -> set[str]:

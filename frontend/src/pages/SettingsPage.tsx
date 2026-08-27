@@ -20,6 +20,14 @@ import {
   updateTwilioConfig,
   type TwilioUpdate,
 } from '@/pages/settings.api';
+import {
+  applyUpdate,
+  checkUpdate,
+  fetchHealthzVersion,
+  pollUpdaterStatus,
+  type ApplyResult,
+  type UpdateStatus,
+} from '@/pages/system.api';
 
 export function SettingsPage() {
   const intl = useIntl();
@@ -238,6 +246,7 @@ export function SettingsPage() {
       <FeatureFlagsCard />
       <PortalConfigCard />
       <WebPushCard />
+      <SystemUpdateCard />
     </div>
   );
 }
@@ -581,6 +590,183 @@ function FeatureFlagsCard() {
             {intl.formatMessage({ id: 'common.loading' })}
           </p>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── native-install self-update (Windows launcher) ─────────────────────────────
+// Hidden entirely under Docker: /api/v1/system/* answers 501 there, so the check
+// query errors and the card renders nothing. Mid-update polling goes through
+// /updater/* (reverse proxy → launcher) with a bare fetch — the backend is down.
+const UPDATE_PHASE_IDS: Record<string, string> = {
+  checking: 'settings.update_phase_checking',
+  precheck: 'settings.update_phase_checking',
+  downloading: 'settings.update_phase_downloading',
+  verifying: 'settings.update_phase_downloading',
+  extracting: 'settings.update_phase_downloading',
+  backup_db: 'settings.update_phase_migrating',
+  stopping_app: 'settings.update_phase_restarting',
+  migrating: 'settings.update_phase_migrating',
+  swapping: 'settings.update_phase_restarting',
+  starting: 'settings.update_phase_restarting',
+  health: 'settings.update_phase_restarting',
+  rollback: 'settings.update_phase_rollback',
+  restoring: 'settings.update_phase_rollback',
+};
+
+function SystemUpdateCard() {
+  const intl = useIntl();
+  const { hasPermission } = useAuthContext();
+  const canManage = hasPermission('settings', 'update');
+
+  const check = useQuery({
+    queryKey: ['system-update'],
+    queryFn: () => checkUpdate(),
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+
+  const [applying, setApplying] = useState<ApplyResult | null>(null);
+  const [progress, setProgress] = useState<UpdateStatus | null>(null);
+  const [restarting, setRestarting] = useState(false);
+  const [failed, setFailed] = useState<UpdateStatus | null>(null);
+
+  useEffect(() => {
+    if (!applying) return;
+    let stopped = false;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const s = await pollUpdaterStatus(applying.poll_url, applying.ticket);
+          if (stopped) return;
+          setProgress(s);
+          setRestarting(false);
+          if (s.phase === 'done') {
+            window.clearInterval(timer);
+            // wait for the NEW backend before reloading the SPA
+            for (let i = 0; i < 90 && !stopped; i++) {
+              const v = await fetchHealthzVersion();
+              if (v && (!s.to || v === s.to)) break;
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+            toast.success(intl.formatMessage({ id: 'settings.update_done' }));
+            window.location.reload();
+          } else if (s.phase === 'failed') {
+            window.clearInterval(timer);
+            setFailed(s);
+            setApplying(null);
+          }
+        } catch {
+          // proxy briefly unreachable while services restart — expected mid-update
+          if (!stopped) setRestarting(true);
+        }
+      })();
+    }, 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [applying, intl]);
+
+  const applyMut = useMutation({
+    mutationFn: () => applyUpdate(check.data?.latest_version),
+    onSuccess: (r) => {
+      setFailed(null);
+      setProgress({ phase: 'checking', percent: 0 });
+      setApplying(r);
+    },
+    onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
+  });
+
+  if (check.isError || !check.data) return null; // Docker / no launcher → hide
+  const d = check.data;
+  const busy = applying !== null || applyMut.isPending;
+  const phaseId = progress ? UPDATE_PHASE_IDS[progress.phase] : undefined;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{intl.formatMessage({ id: 'settings.update_title' })}</CardTitle>
+        <p className="text-xs text-muted-foreground">{intl.formatMessage({ id: 'settings.update_desc' })}</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-3 text-sm">
+          <span>{intl.formatMessage({ id: 'settings.update_current' }, { version: d.current_version })}</span>
+          <span className="text-muted-foreground">
+            {d.latest_version
+              ? intl.formatMessage({ id: 'settings.update_latest' }, { version: d.latest_version })
+              : null}
+          </span>
+          {d.notes_url && (
+            <a className="text-xs underline text-muted-foreground" href={d.notes_url} target="_blank" rel="noreferrer">
+              {intl.formatMessage({ id: 'settings.update_notes' })}
+            </a>
+          )}
+        </div>
+
+        {!busy && d.needs_installer && d.update_available && (
+          <p className="text-sm text-amber-600">
+            {intl.formatMessage({ id: 'settings.update_needs_installer' })}
+            {d.installer_url && (
+              <a className="ml-2 underline" href={d.installer_url} target="_blank" rel="noreferrer">
+                Setup.exe
+              </a>
+            )}
+          </p>
+        )}
+
+        {!busy && !d.update_available && (
+          <p className="text-sm text-muted-foreground">{intl.formatMessage({ id: 'settings.update_uptodate' })}</p>
+        )}
+
+        {busy && progress && (
+          <div className="space-y-2">
+            <div className="h-2 w-full max-w-md overflow-hidden rounded bg-muted">
+              <div className="h-full bg-primary transition-all" style={{ width: `${progress.percent}%` }} />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {restarting
+                ? intl.formatMessage({ id: 'settings.update_phase_restarting' })
+                : phaseId
+                  ? intl.formatMessage({ id: phaseId })
+                  : progress.phase}
+              {progress.message ? ` — ${progress.message}` : ''}
+            </p>
+          </div>
+        )}
+
+        {failed && (
+          <p className="text-sm text-destructive">
+            {intl.formatMessage({ id: 'settings.update_failed' })}
+            {failed.error ? ` (${failed.error})` : ''}{' '}
+            {intl.formatMessage({ id: 'settings.update_rolledback' })}
+          </p>
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || check.isFetching}
+            onClick={() => void check.refetch()}
+          >
+            {intl.formatMessage({ id: 'settings.update_check_btn' })}
+          </Button>
+          {canManage && d.update_available && !d.needs_installer && (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm(intl.formatMessage({ id: 'settings.update_confirm' }))) {
+                  applyMut.mutate();
+                }
+              }}
+            >
+              {intl.formatMessage({ id: 'settings.update_btn' }, { version: d.latest_version ?? '' })}
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

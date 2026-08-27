@@ -4,8 +4,8 @@
 set -e
 
 if [ "${AXP_DB_INIT:-false}" = "true" ]; then
-  echo "[entrypoint] migrate + seed + seed-admin"
-  python -m server.command migrate
+  echo "[entrypoint] db-upgrade + seed + seed-admin"
+  python -m server.command db-upgrade
   python -m server.command seed
   python -m server.command seed-admin
 fi

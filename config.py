@@ -17,7 +17,16 @@ DATABASE_URI = 'mysql+pymysql://{0}:{1}@{2}/{3}?charset=utf8mb4'.format(
 )
 
 # ── Redis (jti denylist + Celery broker) ─────────────────────────────────────
-REDIS_URI = 'redis://{0}:6379'.format(os.getenv('REDIS_URL', 'axp-redis'))
+# REDIS_URL accepts a bare host (docker service name), host:port, or a full
+# redis:// URI; REDIS_PORT applies only to the bare-host form (native installs
+# run on a non-default port to avoid colliding with a host Redis).
+_redis = os.getenv('REDIS_URL', 'axp-redis')
+if _redis.startswith(('redis://', 'rediss://', 'unix://')):
+    REDIS_URI = _redis
+elif ':' in _redis:
+    REDIS_URI = 'redis://{0}'.format(_redis)
+else:
+    REDIS_URI = 'redis://{0}:{1}'.format(_redis, os.getenv('REDIS_PORT', '6379'))
 REDIS_KEY_PREFIX = 'axp'
 
 # ── Flask ────────────────────────────────────────────────────────────────────
@@ -88,6 +97,15 @@ THUMB_CACHE_PREFIX = '%s:thumb:' % REDIS_KEY_PREFIX
 # Persisted last-known camera frame (survives the Redis cache TTL → offline tiles keep
 # showing the last frame). Shared `/media` volume is mounted on backend + worker.
 THUMB_DIR = os.getenv('AXP_THUMB_DIR', '/media/thumbnails')
+
+# ── Native launcher (Windows service) — unset under Docker ───────────────────
+# When AXP_LAUNCHER_URL is set the backend exposes /api/v1/system/* (update check /
+# apply / service status), proxied to the launcher's loopback control API with the
+# shared bearer token. Update-status polling by the browser (while the backend is
+# down mid-update) uses an HMAC ticket keyed by SECRET_KEY instead.
+LAUNCHER_URL = os.getenv('AXP_LAUNCHER_URL')
+LAUNCHER_TOKEN = os.getenv('AXP_LAUNCHER_TOKEN')
+UPDATE_TICKET_TTL_S = int(os.getenv('AXP_UPDATE_TICKET_TTL_S', '1800'))
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '*')

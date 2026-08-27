@@ -1,0 +1,64 @@
+# AeroXProtect native reverse proxy — translation of frontend/nginx.conf.
+# Rendered to config\Caddyfile by the installer; {$VARS} come from the launcher env:
+#   AXP_HTTP_PORT     public HTTP port (default 3000)
+#   AXP_APP_DIR       C:\AeroXProtect\current (junction — resolved per request, so a
+#                     version swap serves the new SPA with no Caddy restart)
+#   AXP_LAUNCHER_PORT launcher control API port (10099)
+{
+	admin off
+	auto_https off
+}
+
+:{$AXP_HTTP_PORT} {
+	encode gzip
+
+	route {
+		# Launcher control API (update progress while the backend restarts).
+		# handle_path strips /updater → launcher sees /v1/…
+		handle_path /updater/* {
+			reverse_proxy 127.0.0.1:{$AXP_LAUNCHER_PORT}
+		}
+
+		# TURN-free MSE live: ticket-checked by the backend (forward_auth ≈ nginx
+		# auth_request), then the WebSocket goes straight to go2rtc — media bytes
+		# bypass Python. Backend reads src/ticket from X-Forwarded-Uri.
+		handle /live-ws/* {
+			forward_auth 127.0.0.1:10000 {
+				uri /api/v1/live/ws-auth
+				header_up -Upgrade
+				header_up -Connection
+			}
+			rewrite * /api/ws
+			reverse_proxy 127.0.0.1:1984
+		}
+
+		# Live fMP4 fallback — endless streamed body: no buffering, no timeouts.
+		handle /api/v1/live/mp4/* {
+			reverse_proxy 127.0.0.1:10000 {
+				flush_interval -1
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		# API → waitress backend. Same-origin keeps refresh cookies working.
+		handle /api/* {
+			reverse_proxy 127.0.0.1:10000 {
+				transport http {
+					read_timeout 300s
+				}
+			}
+		}
+
+		# SPA static + fallback
+		handle {
+			root * "{$AXP_APP_DIR}/frontend"
+			header /assets/* Cache-Control "public, max-age=31536000, immutable"
+			header /index.html Cache-Control "no-cache"
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}

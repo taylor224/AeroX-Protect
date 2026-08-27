@@ -1,0 +1,34 @@
+<!--
+  WinSW service definition for the AeroXProtect launcher.
+  The installer copies this next to a renamed WinSW executable (axp-service.exe)
+  under C:\AeroXProtect\launcher\ and runs `axp-service.exe install`.
+  __AXP_HOME__ is replaced with the install root at install time.
+-->
+<service>
+  <id>AeroXProtect</id>
+  <name>AeroXProtect NVR</name>
+  <description>AeroXProtect network video recorder — supervises database, media hub, recorder, workers and web UI.</description>
+
+  <executable>__AXP_HOME__\runtime\python\python.exe</executable>
+  <arguments>-u -m axp_launcher</arguments>
+  <workingdirectory>__AXP_HOME__\launcher</workingdirectory>
+
+  <env name="AXP_HOME" value="__AXP_HOME__" />
+  <env name="PYTHONPATH" value="__AXP_HOME__\launcher" />
+
+  <!-- graceful stop: ask the launcher to unwind all children before WinSW kills us -->
+  <stopexecutable>__AXP_HOME__\runtime\python\python.exe</stopexecutable>
+  <stoparguments>-m axp_launcher.ctl stop</stoparguments>
+  <stoptimeout>120sec</stoptimeout>
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec" />
+  <resetfailure>1 hour</resetfailure>
+
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>4</keepFiles>
+  </log>
+  <logpath>__AXP_HOME__\data\logs</logpath>
+</service>
