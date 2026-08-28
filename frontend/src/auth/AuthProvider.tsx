@@ -35,8 +35,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Restore session on boot: if we hold a token, fetch /me (axios auto-refreshes if expired).
   const verify = useCallback(async () => {
     if (!getAuth()) {
-      setLoading(false);
-      return;
+      // No local access token, but the HttpOnly refresh cookie may still carry a
+      // live session (cleared localStorage, new browser profile) — try one silent
+      // refresh before deciding we're logged out.
+      try {
+        const { data } = await api.post<ApiResponse<LoginResponse>>('/auth/refresh');
+        if (data.data?.access_token) {
+          setAuth({ access_token: data.data.access_token, expires_in: data.data.expires_in });
+        } else {
+          setLoading(false);
+          return;
+        }
+      } catch {
+        setLoading(false);
+        return;
+      }
     }
     try {
       const { data } = await api.get<ApiResponse<MeResponse>>('/auth/me');

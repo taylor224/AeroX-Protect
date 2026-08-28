@@ -16,12 +16,26 @@ from server.view.response import ResponseBuilder
 context = Blueprint('api_auth', __name__, url_prefix='/api/v1/auth')
 
 
+def _cookie_secure() -> bool:
+    """Secure flag for the refresh cookie. 'auto' mirrors the actual request
+    scheme (ProxyFix has already applied X-Forwarded-Proto): HTTPS deployments
+    keep the Secure cookie, plain-HTTP LAN deployments still get a working
+    refresh cookie instead of the browser silently discarding it — which is what
+    made sessions die on every access-token expiry."""
+    mode = config.COOKIE_SECURE
+    if mode == 'always':
+        return True
+    if mode == 'never':
+        return False
+    return request.is_secure
+
+
 def _set_refresh_cookie(response, refresh_token: str):
     response.set_cookie(
         config.REFRESH_COOKIE_NAME, refresh_token,
         max_age=config.JWT_REFRESH_TTL,
         httponly=True,
-        secure=not (config.PROJECT_ENV == 'development'),
+        secure=_cookie_secure(),
         samesite='Strict',
         path=config.REFRESH_COOKIE_PATH,
     )

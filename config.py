@@ -64,6 +64,11 @@ TWILIO_API_BASE = os.getenv('TWILIO_API_BASE', 'https://api.twilio.com')
 WEBHOOK_ALLOW_PRIVATE = os.getenv('WEBHOOK_ALLOW_PRIVATE', '').lower() == 'true' or PROJECT_ENV != 'production'
 REFRESH_COOKIE_NAME = 'axp_refresh'
 REFRESH_COOKIE_PATH = '/api/v1/auth'
+# Refresh-cookie Secure flag: 'auto' = mirror the request scheme (HTTPS → Secure).
+# NVRs are routinely served over plain HTTP on a LAN; a hard Secure flag there
+# means the browser silently drops the refresh cookie and every access-token
+# expiry (15 min) forces a re-login. 'always'/'never' override for special setups.
+COOKIE_SECURE = os.getenv('AXP_COOKIE_SECURE', 'auto').lower()
 
 # ── Brute-force lockout ──────────────────────────────────────────────────────
 LOGIN_MAX_FAILED = int(os.getenv('LOGIN_MAX_FAILED', '5'))

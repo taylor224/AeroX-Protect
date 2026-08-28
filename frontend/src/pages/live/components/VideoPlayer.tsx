@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { useIntl } from 'react-intl';
 
 import { cn } from '@/lib/utils';
 import { acquireStartSlot } from '@/pages/live/connectGate';
 import { getWsTicket, liveMp4Url, liveWsUrl, webrtcExchange } from '@/pages/live/live.api';
-import { connectMse, mseSupported } from '@/pages/live/mseStream';
+import { connectMse, hevcMseSupported, mseSupported } from '@/pages/live/mseStream';
 import { getIceServers } from '@/pages/live/portal.api';
 import type { RatioMode } from '@/types/axp';
 
@@ -42,10 +43,15 @@ export function VideoPlayer({
   active?: boolean;
   muted?: boolean;
 }) {
+  const intl = useIntl();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<PlayerState>('connecting');
   const [reloadKey, setReloadKey] = useState(0); // bumped by the stall watchdog to re-init
   const stallLimitRef = useRef(WATCHDOG_STALL_MS); // doubles per consecutive reload (no reconnect storm)
+  // Codec problem detected (browser can't decode this camera's codec, typically
+  // H.265 without a transcoded rendition) — the tile shows a warning instead of
+  // an unexplained black square. Cleared when a stream actually plays.
+  const [codecIssue, setCodecIssue] = useState(false);
 
   // tear down streams while the tab is hidden — N background tiles otherwise keep
   // decoding/buffering and the watchdog reload-loops with nobody watching
@@ -95,6 +101,17 @@ export function VideoPlayer({
       clearWs();
       closePc();
       video.srcObject = null;
+      // decode/source errors on the last-resort path: without HEVC support this
+      // is almost always the camera's H.265 — surface the codec warning
+      video.onerror = () => {
+        if (cancelled) return;
+        const code = video.error?.code;
+        if ((code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED)
+            && !hevcMseSupported()) {
+          setCodecIssue(true);
+        }
+        setState('error');
+      };
       video.src = liveMp4Url(go2rtcName);
       setState('mp4');
       void video.play().catch(() => setState('error'));
@@ -121,11 +138,15 @@ export function VideoPlayer({
         },
         {
           onPlaying: () => {
-            if (!cancelled) setState('ws');
+            if (!cancelled) {
+              setState('ws');
+              setCodecIssue(false);
+            }
           },
-          onError: () => {
+          onError: (reason) => {
             clearWs();
             if (cancelled) return;
+            if (reason === 'codec') setCodecIssue(true);
             settled = false;
             void tryWebRTC();
           },
@@ -155,6 +176,7 @@ export function VideoPlayer({
           webrtcLive = true;
           video.srcObject = e.streams[0];
           setState('webrtc');
+          setCodecIssue(false);
           void video.play().catch(() => {});
         };
         pc.oniceconnectionstatechange = () => {
@@ -223,6 +245,7 @@ export function VideoPlayer({
       clearWs();
       closePc();
       if (video) {
+        video.onerror = null;
         video.srcObject = null;
         video.removeAttribute('src');
         video.load();
@@ -246,8 +269,20 @@ export function VideoPlayer({
         </div>
       )}
       {state === 'error' && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-white/50">
-          연결할 수 없습니다
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center">
+          <span className="text-xs text-white/50">
+            {intl.formatMessage({ id: 'live.connect_failed' })}
+          </span>
+          {codecIssue && (
+            <span className="text-[11px] leading-snug text-amber-400/90">
+              {intl.formatMessage({ id: 'live.codec_unsupported' })}
+            </span>
+          )}
+        </div>
+      )}
+      {codecIssue && state !== 'error' && state !== 'ws' && state !== 'webrtc' && (
+        <div className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-amber-400">
+          {intl.formatMessage({ id: 'live.codec_unsupported_short' })}
         </div>
       )}
     </div>

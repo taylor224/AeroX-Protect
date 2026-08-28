@@ -41,9 +41,14 @@ export function hevcMseSupported(): boolean {
   );
 }
 
+/** Why the MSE path gave up: 'codec' = the camera's codec can't be played here
+ *  (browser without HEVC + no transcoded rendition) — fallbacks are doomed too,
+ *  so the tile should tell the user instead of showing a silent black square. */
+export type MseFailReason = 'codec' | 'other';
+
 interface MseOpts {
   onPlaying?: () => void;
-  onError?: () => void;
+  onError?: (reason?: MseFailReason) => void;
 }
 
 // Reconnect fast at first, then back off. A page refresh (or go2rtc restart) races the new
@@ -76,10 +81,10 @@ export function connectMse(video: HTMLVideoElement, getUrl: () => Promise<string
     if (!stopped) opts.onPlaying?.();
   };
 
-  const fail = () => {
+  const fail = (reason: MseFailReason = 'other') => {
     if (stopped) return;
     teardown();
-    opts.onError?.();
+    opts.onError?.(reason);
   };
 
   // Exactly ONE SourceBuffer operation (append/remove) may be in flight at a time; every
@@ -230,12 +235,20 @@ export function connectMse(video: HTMLVideoElement, getUrl: () => Promise<string
                 }
                 trim();
               });
-            } catch {
-              fail();
+            } catch (e) {
+              fail((e as DOMException)?.name === 'NotSupportedError' ? 'codec' : 'other');
             }
           }
         } else if (msg.type === 'error') {
-          scheduleReconnect(); // stream-level error → try to reconnect rather than give up
+          // go2rtc reports "codecs not matched" when the camera's codec isn't in the
+          // list we announced (e.g. H.265 on a browser without HEVC and no transcoded
+          // rendition available). Reconnecting can't fix that — fail fast with a
+          // reason so the tile can explain itself.
+          if (/codec/i.test(msg.value ?? '')) {
+            fail('codec');
+          } else {
+            scheduleReconnect(); // stream-level error → try to reconnect rather than give up
+          }
         }
         return;
       }
