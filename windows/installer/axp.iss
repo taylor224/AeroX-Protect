@@ -50,6 +50,7 @@ Source: "..\mariadb\my.ini.tmpl"; DestDir: "{app}\launcher\templates"; Flags: ig
 Source: "..\redis\redis.windows.conf.tmpl"; DestDir: "{app}\launcher\templates"; Flags: ignoreversion
 Source: "..\go2rtc\go2rtc.windows.yaml"; DestDir: "{app}\launcher\templates"; Flags: ignoreversion
 Source: "postinstall.py"; DestDir: "{app}\launcher"; Flags: ignoreversion
+Source: "open-ui.ps1"; DestDir: "{app}\launcher"; Flags: ignoreversion
 ; versioned app payload
 Source: "{#PayloadDir}\app\*"; DestDir: "{app}\versions\v{#AppVersion}"; Flags: recursesubdirs ignoreversion
 
@@ -100,6 +101,12 @@ Filename: "{code:PyExe}"; \
   StatusMsg: "구성 요소를 설정하는 중..."; Flags: runhidden waituntilterminated
 Filename: "{app}\launcher\axp-service.exe"; Parameters: "start"; \
   StatusMsg: "AeroXProtect 서비스를 시작하는 중..."; Flags: runhidden waituntilterminated
+; finish page: open the web UI (checked by default). open-ui.ps1 waits for the
+; stack to come up first; runasoriginaluser so the browser is not elevated.
+Filename: "powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher\open-ui.ps1"" -Port {code:GetHttpPort}"; \
+  Description: "웹 브라우저에서 AeroXProtect 열기"; \
+  Flags: postinstall runasoriginaluser runhidden nowait
 
 [UninstallRun]
 Filename: "{app}\launcher\axp-service.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "svcstop"
