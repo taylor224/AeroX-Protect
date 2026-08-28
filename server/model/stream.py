@@ -46,9 +46,14 @@ class Stream(SnowflakeMixin, BaseDB):
 
     @classmethod
     def delete_for_camera(cls, camera_id: int):
+        # Tombstone-rename alongside the soft delete: go2rtc_name is UNIQUE across
+        # ALL rows (soft-deleted included), so keeping the name would make the
+        # deterministic cam_<uuid>_<role> re-insert on the next reprobe fail 1062.
         now = utcnow()
+        suffix = ':del:%d' % int(now.timestamp() * 1000)
         db.session.query(cls).filter(cls.camera_id == camera_id, cls.deleted_at.is_(None)).update(
-            {cls.deleted_at: now}, synchronize_session=False)
+            {cls.deleted_at: now, cls.go2rtc_name: cls.go2rtc_name + suffix},
+            synchronize_session=False)
         db.session.commit()
 
     def to_dict(self) -> dict:

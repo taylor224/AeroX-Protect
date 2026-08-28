@@ -103,3 +103,29 @@ def test_ptz_validation_and_execute(client, mock_go2rtc, monkeypatch):
     assert bad.status_code == 400   # pan out of [-1,1]
     ok = client.post(f'/api/v1/cameras/{uuid}/ptz', headers=h, json={'action': 'stop'})
     assert ok.status_code == 200
+
+
+def test_replace_streams_survives_unique_index(client, mock_go2rtc):
+    """Reprobe soft-deletes stream rows then re-inserts the SAME deterministic
+    cam_<uuid>_<role> names; the unique index spans soft-deleted rows, so without
+    tombstone-renaming on delete this was a 1062 IntegrityError loop."""
+    from server.controller.camera import CameraController
+    from server.model.camera import Camera
+    from server.model.stream import Stream
+    from server.model import db
+
+    h = login(client)
+    uuid = _create(client, h).json['data']['uuid']
+    camera = Camera.get_by_uuid(uuid)
+
+    # replace twice with identical payload — the second run used to raise 1062
+    for _ in range(2):
+        CameraController._replace_streams(camera, CAMERA['streams'])
+
+    db.session.expire_all()   # bulk update used synchronize_session=False
+    active = Stream.get_by_camera(camera.id)
+    assert {s.role for s in active} == {'main', 'sub'}
+    assert all(':del:' not in s.go2rtc_name for s in active)
+    tombstones = db.session.query(Stream).filter(
+        Stream.camera_id == camera.id, Stream.deleted_at.isnot(None)).all()
+    assert tombstones and all(':del:' in s.go2rtc_name for s in tombstones)

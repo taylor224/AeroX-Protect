@@ -51,6 +51,7 @@ Source: "..\redis\redis.windows.conf.tmpl"; DestDir: "{app}\launcher\templates";
 Source: "..\go2rtc\go2rtc.windows.yaml"; DestDir: "{app}\launcher\templates"; Flags: ignoreversion
 Source: "postinstall.py"; DestDir: "{app}\launcher"; Flags: ignoreversion
 Source: "bootstrap_admin.py"; DestDir: "{app}\launcher"; Flags: ignoreversion
+Source: "..\launcher\axpctl.cmd"; DestDir: "{app}\launcher"; Flags: ignoreversion
 Source: "open-ui.ps1"; DestDir: "{app}\launcher"; Flags: ignoreversion
 ; versioned app payload
 Source: "{#PayloadDir}\app\*"; DestDir: "{app}\versions\v{#AppVersion}"; Flags: recursesubdirs ignoreversion
@@ -90,11 +91,22 @@ end;
 function GetHttpPort(Param: String): String;
 begin Result := ConfigPage.Values[0]; end;
 
-function GetAdminId(Param: String): String;
-begin Result := ConfigPage.Values[1]; end;
+function HexEncode(const S: String): String;
+var
+  I: Integer;
+begin
+  { UTF-16 code units as 4-hex-digit groups — decoded by bootstrap_admin.py.
+    Quoting-proof: raw values on the command line broke on ", spaces, etc. }
+  Result := '';
+  for I := 1 to Length(S) do
+    Result := Result + Format('%.4x', [Ord(S[I])]);
+end;
 
-function GetAdminPw(Param: String): String;
-begin Result := ConfigPage.Values[2]; end;
+function GetAdminIdHex(Param: String): String;
+begin Result := HexEncode(ConfigPage.Values[1]); end;
+
+function GetAdminPwHex(Param: String): String;
+begin Result := HexEncode(ConfigPage.Values[2]); end;
 
 [Run]
 Filename: "{code:PyExe}"; \
@@ -105,7 +117,7 @@ Filename: "{app}\launcher\axp-service.exe"; Parameters: "start"; \
 ; admin account: the wizard password is handed to seed-admin IN MEMORY only —
 ; never written to axp.env or any file. Waits for the stack's first boot.
 Filename: "{code:PyExe}"; \
-  Parameters: "-u ""{app}\launcher\bootstrap_admin.py"" --home ""{app}"" --admin-id ""{code:GetAdminId}"" --admin-pw ""{code:GetAdminPw}"""; \
+  Parameters: "-u ""{app}\launcher\bootstrap_admin.py"" --home ""{app}"" --admin-id-hex {code:GetAdminIdHex} --admin-pw-hex {code:GetAdminPwHex}"; \
   StatusMsg: "관리자 계정을 생성하는 중... (첫 부팅 대기, 최대 수 분)"; Flags: runhidden waituntilterminated
 ; finish page: open the web UI (checked by default). open-ui.ps1 waits for the
 ; stack to come up first; runasoriginaluser so the browser is not elevated.

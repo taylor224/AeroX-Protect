@@ -254,3 +254,47 @@ def test_capability_probe_surfaces_detected_rtsp_port(monkeypatch):
     monkeypatch.setattr(capability_probe.factory, 'build_driver', lambda *a, **kw: _Drv())
     result = capability_probe.probe('10.0.0.5', username='a', password='b')
     assert result['detected_rtsp_port'] == 10554
+
+
+# ── ISAPI RTSP port detection (non-default ports, e.g. 65004) ─────────────────
+ISAPI_CHANNELS_WITH_PORT = """<?xml version="1.0" encoding="UTF-8"?>
+<StreamingChannelList xmlns="http://www.isapi.org/ver20/XMLSchema">
+  <StreamingChannel>
+    <id>101</id>
+    <Transport><rtspPortNo>65004</rtspPortNo></Transport>
+    <Video><videoCodecType>H.265</videoCodecType>
+      <videoResolutionWidth>3840</videoResolutionWidth>
+      <videoResolutionHeight>2160</videoResolutionHeight>
+      <maxFrameRate>2000</maxFrameRate></Video>
+  </StreamingChannel>
+  <StreamingChannel>
+    <id>102</id>
+    <Transport><rtspPortNo>65004</rtspPortNo></Transport>
+    <Video><videoCodecType>H.264</videoCodecType></Video>
+  </StreamingChannel>
+</StreamingChannelList>"""
+
+
+def test_isapi_channels_carry_rtsp_port():
+    profiles = isapi.parse_channels(ISAPI_CHANNELS_WITH_PORT)
+    assert {p.role: p.rtsp_port for p in profiles} == {'main': 65004, 'sub': 65004}
+
+
+ISAPI_ADMIN_ACCESSES = """<?xml version="1.0" encoding="UTF-8"?>
+<AdminAccessProtocolList xmlns="http://www.isapi.org/ver20/XMLSchema">
+  <AdminAccessProtocol><id>1</id><enabled>true</enabled>
+    <protocol>HTTP</protocol><portNo>64004</portNo></AdminAccessProtocol>
+  <AdminAccessProtocol><id>2</id><enabled>true</enabled>
+    <protocol>RTSP</protocol><portNo>65004</portNo></AdminAccessProtocol>
+</AdminAccessProtocolList>"""
+
+
+def test_isapi_admin_accesses_rtsp_fallback(monkeypatch):
+    driver = IsapiDriver('192.0.2.9', username='u', password='p')
+
+    class FakeResp:
+        status_code = 200
+        text = ISAPI_ADMIN_ACCESSES
+
+    monkeypatch.setattr(driver, '_http_get', lambda path: FakeResp())
+    assert driver._detect_rtsp_port() == 65004

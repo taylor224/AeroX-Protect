@@ -78,6 +78,11 @@ def app_env(cfg: dict[str, str], version_root: Path | None = None,
     """
     root = version_root or CURRENT
     env = dict(os.environ)
+    # ffmpeg on PATH: go2rtc shells out to a bare `ffmpeg` for /api/frame.jpeg
+    # snapshots (the camera online/offline health signal) and for on-demand
+    # H.265→H.264 live transcodes — without this every frame grab fails and
+    # cameras flap offline.
+    env['PATH'] = '%s%s%s' % (FFMPEG.parent, os.pathsep, env.get('PATH', ''))
     env.update({
         'PROJECT_ENV': 'production',
         'TZ': 'UTC',

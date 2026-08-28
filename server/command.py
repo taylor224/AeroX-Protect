@@ -16,9 +16,23 @@ def _ensure_db():
         db.db_init(config.DATABASE_URI, BaseDB)
 
 
+def _import_all_models():
+    """create_all only emits tables whose model modules are imported. The web app
+    imports them transitively via controllers, but this CLI does not — without
+    this sweep a fresh native install silently missed late-added tables (e.g.
+    `encoding_nodes`) while the migration runner baselined them as applied."""
+    import importlib
+    import pkgutil
+
+    import server.model as model_pkg
+    for info in pkgutil.iter_modules(model_pkg.__path__):
+        importlib.import_module('server.model.%s' % info.name)
+
+
 def migrate():
     """Create all tables (idempotent — create_all skips existing)."""
     _ensure_db()
+    _import_all_models()
     db.create_all()
     print('[migrate] tables created on schema `%s`.' % config.DATABASE_DB)
 
@@ -29,6 +43,7 @@ def db_upgrade():
 
     def _create_all():
         _ensure_db()
+        _import_all_models()
         db.create_all()
 
     result = db_migrate.upgrade(create_all_fn=_create_all)

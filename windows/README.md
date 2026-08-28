@@ -11,7 +11,7 @@ Inno Setup 인스톨러 하나로 설치되고, WinSW 기반 Windows 서비스(*
 | uWSGI | waitress (`python -m server.wsgi`, 127.0.0.1:10000) |
 | nginx (frontend) | Caddy — SPA 정적 서빙 + `/api` 프록시 + `forward_auth`로 `/live-ws/` 티켓 검증 + `/updater/*` → 런처 |
 | mysql:8.4 | MariaDB 11.8 (포터블, 루프백 **3307**) |
-| redis:7.4 | redis-windows 7.4 (루프백 **6380**) |
+| redis:7.4 | Redis 5.0.14 native (tporadowski, 루프백 **6380**) |
 | go2rtc 이미지 | go2rtc.exe (1984/8554/8555) |
 | celery prefork | `--pool=threads -c 8 -B` (+ subs 큐 `--pool=threads -c 50`) |
 | python:3.13 이미지 | nuget CPython 3.13 + 버전 디렉터리 동봉 site-packages(`PYTHONPATH` 주입) |

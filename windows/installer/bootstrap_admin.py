@@ -47,12 +47,30 @@ def wait_backend(timeout_s: int = 300) -> bool:
     return False
 
 
+def decode_hex_utf16(s: str) -> str:
+    """Inno Setup passes wizard strings as IntToHex(Ord(ch), 4) per UTF-16 code
+    unit — quoting-proof for passwords containing '"', spaces, Korean, anything.
+    (Plain argv quoting mangled special-character passwords: the install-time
+    admin account ended up with a different password than the user typed.)"""
+    units = bytes(b for i in range(0, len(s), 4)
+                  for b in int(s[i:i + 4], 16).to_bytes(2, 'big'))
+    return units.decode('utf-16-be')
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument('--home', required=True)
     p.add_argument('--admin-id', default='admin')
-    p.add_argument('--admin-pw', required=True)
+    p.add_argument('--admin-pw', default=None)
+    p.add_argument('--admin-id-hex', default=None)
+    p.add_argument('--admin-pw-hex', default=None)
     args = p.parse_args()
+    if args.admin_id_hex:
+        args.admin_id = decode_hex_utf16(args.admin_id_hex)
+    if args.admin_pw_hex:
+        args.admin_pw = decode_hex_utf16(args.admin_pw_hex)
+    if not args.admin_pw:
+        p.error('--admin-pw or --admin-pw-hex required')
 
     home = Path(args.home)
     cfg = load_env(home / 'config' / 'axp.env')

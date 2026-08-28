@@ -38,7 +38,8 @@ def probe(host, *, http_port=80, onvif_port=80, rtsp_port=554, username=None, pa
         caps = driver.get_capabilities()
         result['capabilities'] = caps.to_dict()
         result['streams'] = [s.to_dict() for s in caps.streams]
-        # auto-detect the RTSP port the device actually advertises (best-effort; onvif only)
+        # auto-detect the RTSP port the device actually advertises (best-effort;
+        # onvif GetStreamUri + isapi rtspPortNo/adminAccesses)
         for s in caps.streams:
             port = getattr(s, 'rtsp_port', None)
             if port:

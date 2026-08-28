@@ -21,7 +21,10 @@ class Embedding(SnowflakeMixin, BaseDB):
     text = Column(String(300), nullable=True)
     backend = Column(String(16), nullable=False)            # 'clip' | 'hash'
     dim = Column(Integer, nullable=False)
-    vector = Column(JSON, nullable=False)
+    # quote=True: VECTOR became a reserved word/datatype in MariaDB 11.7+ — an
+    # unquoted `vector JSON` column definition is a 1064 syntax error there.
+    # Backtick-quoting is harmless on MySQL, so this stays dialect-agnostic.
+    vector = Column('vector', JSON, nullable=False, quote=True)
     created_at = Column(DateTime3, nullable=False, default=utcnow)
 
     @classmethod

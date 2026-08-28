@@ -3,6 +3,10 @@ from celery.schedules import crontab
 import config
 
 broker_url = config.REDIS_URI
+# Retry instead of exiting when the broker isn't up yet at worker start — under
+# the native launcher Redis and the workers boot concurrently, and a fast-exit
+# here turns one slow Redis start into a worker crashloop.
+broker_connection_retry_on_startup = True
 result_backend = config.REDIS_URI
 
 broker_transport_options = {

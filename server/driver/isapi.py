@@ -65,6 +65,9 @@ def parse_channels(xml_text: str) -> list[StreamProfile]:
         height = _text(ch, 'videoResolutionHeight')
         max_fr = _text(ch, 'maxFrameRate')
         fps = int(int(max_fr) / 100) if max_fr and max_fr.isdigit() else None
+        # <Transport><rtspPortNo> is present on most firmwares — surfaces a
+        # non-default RTSP port (e.g. 65004) so registration doesn't assume 554
+        rtsp_port = _text(ch, 'rtspPortNo')
         profiles.append(StreamProfile(
             role=_role_for_channel_id(channel_id),
             codec=codec,
@@ -72,6 +75,7 @@ def parse_channels(xml_text: str) -> list[StreamProfile]:
             height=int(height) if height and height.isdigit() else None,
             fps=fps,
             rtsp_path='/Streaming/Channels/%s' % channel_id,
+            rtsp_port=int(rtsp_port) if rtsp_port and rtsp_port.isdigit() else None,
         ))
     # de-dupe by role keeping first (main/sub/third)
     seen, unique = set(), []
@@ -103,9 +107,33 @@ class IsapiDriver(CameraDriver):
             raise DriverError('channels http %s' % resp.status_code)
         return parse_channels(resp.text)
 
+    def _detect_rtsp_port(self) -> int | None:
+        """Fallback when the channels XML carries no rtspPortNo: the admin access
+        list (/ISAPI/Security/adminAccesses) enumerates protocol/port pairs and
+        includes RTSP on most firmwares."""
+        try:
+            r = self._http_get('/ISAPI/Security/adminAccesses')
+            if r.status_code != 200:
+                return None
+            root = ET.fromstring(r.text)
+            for proto in root.iter():
+                if _localname(proto.tag) != 'AdminAccessProtocol':
+                    continue
+                if (_text(proto, 'protocol') or '').upper() == 'RTSP':
+                    port = _text(proto, 'portNo')
+                    return int(port) if port and port.isdigit() else None
+        except (DriverError, ET.ParseError):
+            pass
+        return None
+
     def get_capabilities(self) -> Capabilities:
         info = self.get_device_info()
         profiles = self.get_stream_profiles()
+        if profiles and not any(p.rtsp_port for p in profiles):
+            detected = self._detect_rtsp_port()
+            if detected:
+                for p in profiles:
+                    p.rtsp_port = detected
         ptz = {'supported': False}
         try:
             r = self._http_get('/ISAPI/PTZCtrl/channels/%d/capabilities' % self._ch)

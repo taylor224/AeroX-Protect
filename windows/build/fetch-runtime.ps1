@@ -28,10 +28,12 @@ $Pins = @(
     @{ Name = 'caddy';   Version = '2.8.4'
        Url = 'https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_windows_amd64.zip'
        Sha256 = 'SKIP'; Kind = 'zip' }
-    # Redis for Windows: redis-windows MSYS2 build of 7.4 (matches the Docker image
-    # major); fallback pin = tporadowski 5.0.14.1 (app needs only a 3.x-era surface).
-    @{ Name = 'redis';   Version = '7.4.2'
-       Url = 'https://github.com/redis-windows/redis-windows/releases/download/7.4.2/Redis-7.4.2-Windows-x64-msys2.zip'
+    # Redis for Windows: tporadowski native Win32 build. The redis-windows 7.4
+    # MSYS2 build was tried first but its runtime rejects absolute Windows config
+    # paths ("can't open config file '/launcher/C:/…'") → crashloop. The app only
+    # needs a Redis 3.x-era command surface, so native 5.0.14.1 is the right pin.
+    @{ Name = 'redis';   Version = '5.0.14.1'
+       Url = 'https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip'
        Sha256 = 'SKIP'; Kind = 'zip' }
     @{ Name = 'mariadb'; Version = '11.8.9'   # newest 11.8 LTS patch
        Url = 'https://archive.mariadb.org/mariadb-11.8.9/winx64-packages/mariadb-11.8.9-winx64.zip'

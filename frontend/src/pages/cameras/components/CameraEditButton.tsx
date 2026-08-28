@@ -73,6 +73,11 @@ export function CameraEditButton({ camera }: { camera: Camera }) {
   const probeMut = useMutation({
     mutationFn: () => reprobeCamera(camera.uuid),
     onSuccess: (cam) => {
+      // the server reports partial probe failures via camera status, not HTTP errors
+      if (cam.status === 'error' || cam.status === 'unauthorized') {
+        toast.error(intl.formatMessage({ id: 'camera.detect_failed' }));
+        return;
+      }
       setForm((f) => ({ ...f, vendor: cam.vendor ?? f.vendor, driver: cam.driver ?? f.driver }));
       setStreams(cam.streams ?? []);
       void queryClient.invalidateQueries({ queryKey: ['cameras'] });

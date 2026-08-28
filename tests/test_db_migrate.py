@@ -154,3 +154,16 @@ def test_status_reports_pending(monkeypatch, migrations_dir):
     _patch_conn(monkeypatch, conn)
     s = db_migrate.status()
     assert s == {'applied': ['0000'], 'pending': ['0001']}
+
+
+# ── model import coverage for create_all (fresh native installs) ─────────────
+def test_import_all_models_covers_every_table():
+    """create_all only emits imported models; the CLI must sweep the whole model
+    package or fresh installs miss late-added tables (encoding_nodes regression)."""
+    from server.command import _import_all_models
+    from server.model import BaseDB
+    _import_all_models()
+    tables = set(BaseDB.metadata.tables)
+    for expected in ('encoding_nodes', 'encode_assignments', 'flows', 'flow_runs',
+                     'roles', 'segments', 'cameras'):
+        assert expected in tables, expected

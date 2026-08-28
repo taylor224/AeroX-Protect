@@ -79,6 +79,8 @@ export interface DiscoveredDevice {
   hardware: string | null;
   source?: string; // 'onvif' | 'sadp'
   http_port?: string | number | null;
+  /** ONVIF service port parsed server-side from the XAddr URL. */
+  onvif_port?: number | null;
 }
 
 export type RatioMode = 'fit' | 'stretch' | 'crop';

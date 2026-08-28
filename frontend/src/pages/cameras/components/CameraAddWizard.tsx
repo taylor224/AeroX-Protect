@@ -85,11 +85,16 @@ export function CameraAddWizard({ onCreated }: { onCreated: () => void }) {
   };
 
   const pickDevice = (d: DiscoveredDevice) => {
+    // Real ports from discovery, never bare defaults: the ONVIF service port comes
+    // from the XAddr URL (server-parsed onvif_port, else client parse), and the web
+    // port from SADP when known — otherwise the ONVIF service usually rides the web
+    // port, so reuse it (devices on e.g. 64004 register wrong as 80 without this).
+    const onvifPort = d.onvif_port ? String(d.onvif_port) : onvifPortFromXaddrs(d.xaddrs);
     setForm((f) => ({
       ...f,
       host: d.host,
-      onvif_port: onvifPortFromXaddrs(d.xaddrs),
-      ...(d.http_port ? { http_port: String(d.http_port) } : {}),
+      onvif_port: onvifPort,
+      http_port: d.http_port ? String(d.http_port) : onvifPort,
     }));
     if (!name && (d.model || d.name)) setName(d.model ?? d.name ?? '');
     setResult(null);

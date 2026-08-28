@@ -40,6 +40,17 @@ def _host_from_xaddr(xaddr: str) -> str | None:
         return None
 
 
+def _port_from_xaddr(xaddr: str) -> int | None:
+    """The ONVIF service port from an XAddr URL — devices on non-default web
+    ports (e.g. 64004) advertise it here; registration must not assume 80."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(xaddr)
+        return parsed.port or (443 if parsed.scheme == 'https' else 80)
+    except Exception:
+        return None
+
+
 def ws_discovery(timeout: int = 4) -> list[dict]:
     """Run WS-Discovery once; return normalized device list. Best-effort (multicast
     only reaches the same L2 segment — other subnets use manual probe)."""
@@ -64,9 +75,11 @@ def ws_discovery(timeout: int = 4) -> list[dict]:
                 continue
             seen.add(host)
             meta = _parse_scopes(scopes)
+            onvif_port = next((p for p in (_port_from_xaddr(x) for x in xaddrs) if p), None)
             devices.append({
                 'host': host,
                 'xaddrs': xaddrs,
+                'onvif_port': onvif_port,
                 'name': meta.get('name'),
                 'manufacturer': meta.get('manufacturer'),
                 'model': meta.get('model'),
@@ -172,4 +185,6 @@ def discover_all(timeout: int = 4) -> list[dict]:
                 ex['model'] = d.get('model')
             if not ex.get('manufacturer'):
                 ex['manufacturer'] = d.get('manufacturer')
+            if not ex.get('http_port'):
+                ex['http_port'] = d.get('http_port')   # SADP knows the real web port
     return list(by_host.values())

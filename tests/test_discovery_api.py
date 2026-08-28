@@ -73,3 +73,27 @@ def test_discover_all_merges_onvif_and_sadp(monkeypatch):
     assert out['192.168.1.64']['source'] == 'onvif'                       # onvif entry wins
     assert out['192.168.1.64']['model'] == 'DS-2CD'                       # …enriched by sadp model
     assert out['192.168.1.99']['source'] == 'sadp'                        # sadp-only device added
+
+
+def test_ws_discovery_port_from_xaddr():
+    from server.service.discovery import _port_from_xaddr
+    assert _port_from_xaddr('http://192.0.2.5:64004/onvif/device_service') == 64004
+    assert _port_from_xaddr('http://192.0.2.5/onvif/device_service') == 80
+    assert _port_from_xaddr('https://192.0.2.5/onvif/device_service') == 443
+
+
+def test_discover_all_enriches_http_port_from_sadp(monkeypatch):
+    from server.service import discovery
+    monkeypatch.setattr(discovery, 'ws_discovery', lambda timeout=4: [
+        {'host': '192.0.2.5', 'xaddrs': ['http://192.0.2.5:64004/onvif/device_service'],
+         'onvif_port': 64004, 'name': None, 'manufacturer': None, 'model': None,
+         'hardware': None, 'source': 'onvif'}])
+    monkeypatch.setattr(discovery, 'sadp_discovery', lambda timeout=4: [
+        {'host': '192.0.2.5', 'xaddrs': [], 'name': 'cam', 'manufacturer': 'hikvision',
+         'model': 'DS-1', 'hardware': 'SN', 'http_port': '64004', 'source': 'sadp'}])
+    merged = discovery.discover_all()
+    assert len(merged) == 1
+    d = merged[0]
+    assert d['onvif_port'] == 64004
+    assert d['http_port'] == '64004'
+    assert d['model'] == 'DS-1'

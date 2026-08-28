@@ -197,8 +197,20 @@ class CameraController:
             camera.set_status(STATUS_ERROR, str(e))
             return camera.to_dict(with_streams=True)
 
+        if result.get('error') and not result.get('streams'):
+            # Partial probe failure (device info OK but capability/stream fetch
+            # errored). Report it as an error instead of pretending "0 streams
+            # detected" — that silently masked transient camera hiccups.
+            camera.set_status(STATUS_ERROR, str(result['error']))
+            return camera.to_dict(with_streams=True)
+
         camera.model = result.get('model') or camera.model
         camera.firmware = result.get('firmware') or camera.firmware
+        # adopt the device-advertised RTSP port (e.g. 65004) — stream URLs are
+        # rebuilt from camera.rtsp_port below, so a camera registered with a wrong
+        # port self-heals on reprobe
+        if result.get('detected_rtsp_port'):
+            camera.rtsp_port = result['detected_rtsp_port']
         camera.capabilities = result.get('capabilities')
         camera.ptz_supported = bool(result.get('ptz_supported'))
         camera.audio_supported = bool(result.get('audio_supported'))

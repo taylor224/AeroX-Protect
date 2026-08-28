@@ -16,6 +16,7 @@ BACKOFF_START = 1.0
 BACKOFF_MAX = 60.0
 CRASHLOOP_WINDOW_S = 600.0
 CRASHLOOP_LIMIT = 10
+CRASHLOOP_RETRY_S = 300.0   # crashlooping ≠ dead: retry every 5 min (dependency may heal)
 HEALTHY_RESET_S = 120.0
 READY_TIMEOUT_S = 90.0
 
@@ -78,7 +79,9 @@ def build_specs(cfg: dict[str, str]) -> list[ServiceSpec]:
         ),
         ServiceSpec(
             name='redis',
-            cmd=lambda c: [str(env.REDIS_SERVER), str(env.CONFIG / 'redis.conf')],
+            # forward slashes: harmless for the native build, required by any
+            # msys2-runtime redis (backslash paths get mangled to cwd-relative)
+            cmd=lambda c: [str(env.REDIS_SERVER), (env.CONFIG / 'redis.conf').as_posix()],
             ready=lambda c: health.tcp_open(env.REDIS_PORT),
             stop=lambda c, p: subprocess.run(
                 [str(env.REDIS_CLI), '-p', str(env.REDIS_PORT), 'shutdown', 'nosave'],
@@ -111,14 +114,23 @@ def build_specs(cfg: dict[str, str]) -> list[ServiceSpec]:
             graceful_timeout=20,
             app_tier=True,
         ),
+        # celery refuses embedded beat (-B) on Windows → beat runs as its own service
         ServiceSpec(
             name='worker',
-            cmd=_app_cmd('-m', 'celery', '-A', 'server.task.celery', 'worker', '-B',
-                         '--pool=threads', '-c', '8', '-n', 'worker@axp', '-l', 'info',
-                         '-s', str(env.DATA / 'celerybeat-schedule')),
+            cmd=_app_cmd('-m', 'celery', '-A', 'server.task.celery', 'worker',
+                         '--pool=threads', '-c', '8', '-n', 'worker@axp', '-l', 'info'),
             env=app_env({'SNOWFLAKE_INSTANCE': '2'}),
             cwd=lambda: str(env.CURRENT / 'app'),
             graceful_timeout=30,
+            app_tier=True,
+        ),
+        ServiceSpec(
+            name='beat',
+            cmd=_app_cmd('-m', 'celery', '-A', 'server.task.celery', 'beat',
+                         '-l', 'info', '-s', str(env.DATA / 'celerybeat-schedule')),
+            env=app_env({'SNOWFLAKE_INSTANCE': '7'}),
+            cwd=lambda: str(env.CURRENT / 'app'),
+            graceful_timeout=15,
             app_tier=True,
         ),
         ServiceSpec(
@@ -325,7 +337,17 @@ class Supervisor:
                     self._monitor_one(st)
 
     def _monitor_one(self, st: ServiceState):
-        if not st.desired or st.status in ('crashlooping', 'disabled'):
+        if not st.desired or st.status == 'disabled':
+            return
+        if st.status == 'crashlooping':
+            # Slow-retry mode: the cause (e.g. a dependency that was down) may have
+            # healed — try again every CRASHLOOP_RETRY_S with a fresh death window.
+            if st.popen is None and time.monotonic() >= st.next_retry:
+                st.recent_deaths.clear()
+                self._start_and_wait(st)
+                if st.status != 'running':
+                    st.status = 'crashlooping'
+                    st.next_retry = time.monotonic() + CRASHLOOP_RETRY_S
             return
         popen = st.popen
         if popen is None:
@@ -353,9 +375,11 @@ class Supervisor:
         st.recent_deaths = [t for t in st.recent_deaths if now - t < CRASHLOOP_WINDOW_S]
         st.recent_deaths.append(now)
         if len(st.recent_deaths) > CRASHLOOP_LIMIT:
-            logger.error('%s: crashlooping (%d deaths in %ds) — giving up',
-                         st.spec.name, len(st.recent_deaths), CRASHLOOP_WINDOW_S)
+            logger.error('%s: crashlooping (%d deaths in %ds) — backing off to %ds retries',
+                         st.spec.name, len(st.recent_deaths), CRASHLOOP_WINDOW_S,
+                         CRASHLOOP_RETRY_S)
             st.status = 'crashlooping'
+            st.next_retry = time.monotonic() + CRASHLOOP_RETRY_S
 
     def shutdown(self):
         self._stop_event.set()
