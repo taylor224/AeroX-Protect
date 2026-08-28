@@ -1,7 +1,7 @@
 """Installer post-install step (run by Inno Setup with the bundled runtime python):
 
     python.exe postinstall.py --home C:\\AeroXProtect --http-port 3000
-        --disk-root C:\\AeroXProtect\\storage --admin-id admin --admin-pw ****
+        --disk-root C:\\AeroXProtect\\storage
 
 Idempotent: re-running (upgrade install) keeps an existing axp.env and datadir.
 Does: dirs, secret generation, axp.env, template rendering (__AXP_HOME__),
@@ -22,8 +22,6 @@ def parse_args():
     p.add_argument('--version', required=True)
     p.add_argument('--http-port', default='3000')
     p.add_argument('--disk-root', default='')
-    p.add_argument('--admin-id', default='admin')
-    p.add_argument('--admin-pw', default='')
     return p.parse_args()
 
 
@@ -36,9 +34,12 @@ def _fernet_key() -> str:
 
 
 def write_env(home: Path, args) -> Path:
-    """config\\axp.env — created once; later installs keep existing secrets."""
+    """config\\axp.env — created once; later installs keep existing secrets.
+    The admin password is deliberately NOT stored here — bootstrap_admin.py
+    hands it to seed-admin in memory after the service boots."""
     env_file = home / 'config' / 'axp.env'
     if env_file.exists():
+        _strip_bootstrap_lines(env_file)   # remove admin creds older installers persisted
         print('axp.env exists — keeping current secrets')
         return env_file
     disk_root = args.disk_root or str(home / 'storage')
@@ -57,12 +58,19 @@ def write_env(home: Path, args) -> Path:
         'AXP_DISK_ROOT=%s' % disk_root,
         'GITHUB_REPO=taylor224/AeroX-Protect',
         'AXP_UPDATE_DB_BACKUP=true',
-        'BOOTSTRAP_ADMIN_ID=%s' % args.admin_id,
-        'BOOTSTRAP_ADMIN_PW=%s' % args.admin_pw,
         'ENCODER_HWACCEL=none',
     ]
     env_file.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return env_file
+
+
+def _strip_bootstrap_lines(env_file: Path):
+    """Drop BOOTSTRAP_ADMIN_* lines an earlier installer version wrote to disk."""
+    lines = env_file.read_text(encoding='utf-8').splitlines()
+    kept = [l for l in lines if not l.strip().startswith('BOOTSTRAP_ADMIN_')]
+    if len(kept) != len(lines):
+        env_file.write_text('\n'.join(kept) + '\n', encoding='utf-8')
+        print('removed persisted BOOTSTRAP_ADMIN_* from axp.env')
 
 
 def render_templates(home: Path):

@@ -105,11 +105,9 @@ def app_env(cfg: dict[str, str], version_root: Path | None = None,
         'AXP_LAUNCHER_URL': 'http://127.0.0.1:%d' % CONTROL_PORT,
         'AXP_LAUNCHER_TOKEN': cfg.get('AXP_LAUNCHER_TOKEN', ''),
         'AXP_DB_INIT': 'false',
-        # seed-admin (dbinit one-shot) creates the first admin from these; without
-        # them it silently skips and the install has no login at all.
-        'BOOTSTRAP_ADMIN_ID': cfg.get('BOOTSTRAP_ADMIN_ID', 'admin'),
-        'BOOTSTRAP_ADMIN_PW': cfg.get('BOOTSTRAP_ADMIN_PW', ''),
-        'BOOTSTRAP_ADMIN_NAME': cfg.get('BOOTSTRAP_ADMIN_NAME', '관리자'),
+        # No BOOTSTRAP_ADMIN_* here: the admin password is never persisted to
+        # axp.env — the installer's bootstrap_admin.py step hands it to
+        # seed-admin in memory once, right after the first boot.
     })
     if extra:
         env.update(extra)

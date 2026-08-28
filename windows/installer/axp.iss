@@ -50,6 +50,7 @@ Source: "..\mariadb\my.ini.tmpl"; DestDir: "{app}\launcher\templates"; Flags: ig
 Source: "..\redis\redis.windows.conf.tmpl"; DestDir: "{app}\launcher\templates"; Flags: ignoreversion
 Source: "..\go2rtc\go2rtc.windows.yaml"; DestDir: "{app}\launcher\templates"; Flags: ignoreversion
 Source: "postinstall.py"; DestDir: "{app}\launcher"; Flags: ignoreversion
+Source: "bootstrap_admin.py"; DestDir: "{app}\launcher"; Flags: ignoreversion
 Source: "open-ui.ps1"; DestDir: "{app}\launcher"; Flags: ignoreversion
 ; versioned app payload
 Source: "{#PayloadDir}\app\*"; DestDir: "{app}\versions\v{#AppVersion}"; Flags: recursesubdirs ignoreversion
@@ -97,10 +98,15 @@ begin Result := ConfigPage.Values[2]; end;
 
 [Run]
 Filename: "{code:PyExe}"; \
-  Parameters: "-u ""{app}\launcher\postinstall.py"" --home ""{app}"" --version ""{#AppVersion}"" --http-port ""{code:GetHttpPort}"" --admin-id ""{code:GetAdminId}"" --admin-pw ""{code:GetAdminPw}"""; \
+  Parameters: "-u ""{app}\launcher\postinstall.py"" --home ""{app}"" --version ""{#AppVersion}"" --http-port ""{code:GetHttpPort}"""; \
   StatusMsg: "구성 요소를 설정하는 중..."; Flags: runhidden waituntilterminated
 Filename: "{app}\launcher\axp-service.exe"; Parameters: "start"; \
   StatusMsg: "AeroXProtect 서비스를 시작하는 중..."; Flags: runhidden waituntilterminated
+; admin account: the wizard password is handed to seed-admin IN MEMORY only —
+; never written to axp.env or any file. Waits for the stack's first boot.
+Filename: "{code:PyExe}"; \
+  Parameters: "-u ""{app}\launcher\bootstrap_admin.py"" --home ""{app}"" --admin-id ""{code:GetAdminId}"" --admin-pw ""{code:GetAdminPw}"""; \
+  StatusMsg: "관리자 계정을 생성하는 중... (첫 부팅 대기, 최대 수 분)"; Flags: runhidden waituntilterminated
 ; finish page: open the web UI (checked by default). open-ui.ps1 waits for the
 ; stack to come up first; runasoriginaluser so the browser is not elevated.
 Filename: "powershell.exe"; \
