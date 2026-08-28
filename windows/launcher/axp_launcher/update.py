@@ -27,16 +27,41 @@ from . import LAUNCHER_VERSION, env, health, mariadb_init
 
 logger = logging.getLogger(__name__)
 
-APP_ASSET_RE = re.compile(r'^aeroxprotect-windows-x64-app-v(?P<v>[\d.]+)\.zip$')
-MANIFEST_ASSET_RE = re.compile(r'^manifest-v[\d.]+\.json$')
+MANIFEST_ASSET_RE = re.compile(r'^manifest-v[0-9A-Za-z.\-]+\.json$')
 CHECK_CACHE_TTL_S = 3600
 FORCED_CHECK_TTL_S = 300
 HEALTH_GATE_S = 120
 KEEP_VERSIONS = 2
 
+# Update channels: which release tags a machine is willing to install.
+#   stable → releases only (vX.Y.Z)
+#   beta   → + vX.Y.Z-beta.N / -rc.N prereleases
+#   alpha  → + vX.Y.Z-alpha.N (everything)
+_PRE_RANK = {'alpha': 0, 'beta': 1, 'rc': 2}
+CHANNEL_MIN_RANK = {'stable': 3, 'beta': 1, 'alpha': 0}   # 3 = releases only
+
 
 def _vtuple(v: str) -> tuple:
-    return tuple(int(p) for p in re.findall(r'\d+', v or '0')[:4]) or (0,)
+    """Sortable version key with semver-style prerelease ordering:
+    0.1.2-alpha.1 < 0.1.2-beta.1 < 0.1.2-rc.1 < 0.1.2 < 0.1.3-alpha.1"""
+    main, _, pre = (v or '0').lstrip('v').partition('-')
+    nums = tuple(int(p) for p in re.findall(r'\d+', main)[:3])
+    nums = (nums + (0, 0, 0))[:3]
+    if not pre:
+        return nums + (3, 0)
+    m = re.match(r'([A-Za-z]+)\.?(\d+)?', pre)
+    rank = _PRE_RANK.get((m.group(1) if m else '').lower(), 0)
+    num = int(m.group(2)) if m and m.group(2) else 0
+    return nums + (rank, num)
+
+
+def _prerelease_rank(tag: str) -> int:
+    """3 for a plain release tag, else the prerelease rank (alpha 0 / beta 1 / rc 2)."""
+    _, _, pre = tag.lstrip('v').partition('-')
+    if not pre:
+        return 3
+    m = re.match(r'([A-Za-z]+)', pre)
+    return _PRE_RANK.get((m.group(1) if m else '').lower(), 0)
 
 
 class Updater:
@@ -46,7 +71,7 @@ class Updater:
         self.lock = threading.Lock()
         self.state = {'phase': 'idle', 'percent': 0, 'message': None, 'error': None,
                       'from': None, 'to': None}
-        self._check_cache: dict | None = None
+        self._check_cache: dict = {}   # per-channel check results
         self._check_at = 0.0
         self.repo = cfg.get('GITHUB_REPO', 'taylor224/AeroX-Protect')
 
@@ -72,22 +97,36 @@ class Updater:
         with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
             return json.loads(r.read().decode('utf-8'))
 
-    def check(self, force: bool = False) -> dict:
+    def _pick_release(self, channel: str) -> dict | None:
+        """Newest non-draft release whose tag the channel accepts."""
+        min_rank = CHANNEL_MIN_RANK.get(channel, 3)
+        releases = self._github_json(
+            'https://api.github.com/repos/%s/releases?per_page=30' % self.repo)
+        candidates = [
+            r for r in releases
+            if not r.get('draft') and _prerelease_rank(r.get('tag_name') or '') >= min_rank
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda r: _vtuple(r.get('tag_name') or '0'))
+
+    def check(self, force: bool = False, channel: str = 'stable') -> dict:
         now = time.time()
         ttl = FORCED_CHECK_TTL_S if force else CHECK_CACHE_TTL_S
-        if self._check_cache is not None and now - self._check_at < ttl:
-            return self._check_cache
-        rel = self._github_json(
-            'https://api.github.com/repos/%s/releases/latest' % self.repo)
+        cached = self._check_cache.get(channel) if isinstance(self._check_cache, dict) else None
+        if cached is not None and now - cached['_at'] < ttl:
+            return {k: v for k, v in cached.items() if k != '_at'}
+        rel = self._pick_release(channel) or {}
         latest = (rel.get('tag_name') or '').lstrip('v')
         assets = {a['name']: a for a in rel.get('assets', [])}
-        manifest = self._load_manifest(assets)
+        manifest = self._load_manifest(assets) if assets else None
         current = env.current_version()
         needs_installer = bool(
             manifest and _vtuple(manifest.get('min_launcher_version', '0'))
             > _vtuple(LAUNCHER_VERSION))
         installer = next((a for n, a in assets.items() if n.endswith('.exe')), None)
         result = {
+            'channel': channel,
             'latest_version': latest or None,
             'update_available': bool(latest) and _vtuple(latest) > _vtuple(current),
             'needs_installer': needs_installer,
@@ -95,7 +134,9 @@ class Updater:
             'installer_url': installer['browser_download_url'] if installer else None,
             'checked_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         }
-        self._check_cache, self._check_at = result, now
+        if not isinstance(self._check_cache, dict):
+            self._check_cache = {}
+        self._check_cache[channel] = {**result, '_at': now}
         return result
 
     def _load_manifest(self, assets: dict) -> dict | None:
@@ -109,23 +150,27 @@ class Updater:
             return None
 
     # ── apply ────────────────────────────────────────────────────────────────
-    def apply(self, version: str | None) -> bool:
+    def apply(self, version: str | None, channel: str = 'stable') -> bool:
         """Kick the update in a background thread. False if one is already running."""
         if not self.lock.acquire(blocking=False):
             return False
-        t = threading.Thread(target=self._run, args=(version,), name='updater', daemon=True)
+        t = threading.Thread(target=self._run, args=(version, channel), name='updater', daemon=True)
         t.start()
         return True
 
-    def _run(self, version: str | None):
+    def _run(self, version: str | None, channel: str = 'stable'):
         db_changed = False
         dump_path: Path | None = None
         prev_version = env.current_version()
         try:
             self._set('checking', 2)
-            rel = self._github_json(
-                'https://api.github.com/repos/%s/releases/%s' % (
-                    self.repo, 'tags/v%s' % version if version else 'latest'))
+            if version:
+                rel = self._github_json(
+                    'https://api.github.com/repos/%s/releases/tags/v%s' % (self.repo, version))
+            else:
+                rel = self._pick_release(channel)
+                if not rel:
+                    raise RuntimeError('no release available on channel %s' % channel)
             target = (rel.get('tag_name') or '').lstrip('v')
             assets = {a['name']: a for a in rel.get('assets', [])}
             manifest = self._load_manifest(assets) or {}
@@ -205,7 +250,7 @@ class Updater:
             self._write_installed(target, prev_version)
             self._prune_versions(keep={target, prev_version})
             self._set('done', 100, message='updated to v%s' % target)
-            self._check_cache = None
+            self._check_cache = {}
         except Exception as e:
             logger.exception('update failed')
             self._rollback(prev_version, dump_path if db_changed else None, str(e))

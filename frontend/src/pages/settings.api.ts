@@ -11,6 +11,8 @@ export interface GeneralSettings {
   webrtc_candidate_ip: string;
   /** Stop live H.264 transcodes after this many seconds with no viewer (0 = always warm). */
   live_transcode_idle_s: number;
+  /** Native-install auto-update channel. */
+  update_channel: 'stable' | 'beta' | 'alpha';
 }
 
 export async function getGeneralSettings(): Promise<GeneralSettings> {

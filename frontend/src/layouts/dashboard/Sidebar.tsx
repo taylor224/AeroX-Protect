@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { ShieldCheck } from 'lucide-react';
 import { useIntl } from 'react-intl';
 import { NavLink } from 'react-router-dom';
@@ -6,11 +7,20 @@ import { useAuthContext } from '@/auth/useAuthContext';
 import { NAV_ITEMS } from '@/config/menu.config';
 import { useFeatureFlags } from '@/lib/featureFlags';
 import { cn } from '@/lib/utils';
+import { fetchHealthzVersion } from '@/pages/system.api';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const intl = useIntl();
   const { hasPermission } = useAuthContext();
   const flags = useFeatureFlags();
+  // the running BACKEND's version (not the SPA build's) — the two can drift
+  // between an update and a hard refresh, and the server is the truth
+  const { data: serverVersion } = useQuery({
+    queryKey: ['server-version'],
+    queryFn: fetchHealthzVersion,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
   const items = NAV_ITEMS.filter(
     (item) =>
       (!item.resource || hasPermission(item.resource, item.action!)) &&
@@ -52,7 +62,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <div className="border-t border-border px-5 py-3 text-[11px] text-muted-foreground">AeroX Protect · v5</div>
+      <div className="border-t border-border px-5 py-3 text-[11px] text-muted-foreground">
+        AeroX Protect{serverVersion ? ` · v${serverVersion}` : ''}
+      </div>
     </aside>
   );
 }

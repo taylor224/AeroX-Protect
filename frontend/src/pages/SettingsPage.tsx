@@ -617,6 +617,7 @@ const UPDATE_PHASE_IDS: Record<string, string> = {
 
 function SystemUpdateCard() {
   const intl = useIntl();
+  const queryClient = useQueryClient();
   const { hasPermission } = useAuthContext();
   const canManage = hasPermission('settings', 'update');
 
@@ -625,6 +626,19 @@ function SystemUpdateCard() {
     queryFn: () => checkUpdate(),
     staleTime: 60 * 60 * 1000,
     retry: false,
+  });
+
+  // release channel: stable = releases only, beta adds -beta/-rc, alpha adds all
+  const settings = useQuery({ queryKey: ['general-settings'], queryFn: getGeneralSettings });
+  const channelMut = useMutation({
+    mutationFn: (channel: 'stable' | 'beta' | 'alpha') =>
+      updateGeneralSettings({ update_channel: channel }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['general-settings'] });
+      await queryClient.invalidateQueries({ queryKey: ['system-update'] });
+      void check.refetch();
+    },
+    onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
   });
 
   const [applying, setApplying] = useState<ApplyResult | null>(null);
@@ -744,7 +758,17 @@ function SystemUpdateCard() {
           </p>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <select
+            className="h-8 rounded border border-input bg-background px-2 text-xs"
+            value={settings.data?.update_channel ?? 'stable'}
+            disabled={!canManage || busy || channelMut.isPending}
+            onChange={(e) => channelMut.mutate(e.target.value as 'stable' | 'beta' | 'alpha')}
+          >
+            <option value="stable">{intl.formatMessage({ id: 'settings.update_channel_stable' })}</option>
+            <option value="beta">{intl.formatMessage({ id: 'settings.update_channel_beta' })}</option>
+            <option value="alpha">{intl.formatMessage({ id: 'settings.update_channel_alpha' })}</option>
+          </select>
           <Button
             variant="outline"
             size="sm"

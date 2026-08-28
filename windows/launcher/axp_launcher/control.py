@@ -91,7 +91,8 @@ class ControlServer:
                 if path == '/v1/update/check':
                     try:
                         force = (query.get('force') or ['0'])[0] in ('1', 'true')
-                        return self._json(200, outer.updater.check(force=force))
+                        channel = (query.get('channel') or ['stable'])[0]
+                        return self._json(200, outer.updater.check(force=force, channel=channel))
                     except Exception as e:
                         logger.exception('update check failed')
                         return self._json(502, {'error': str(e)})
@@ -116,7 +117,8 @@ class ControlServer:
                     body = {}
 
                 if path == '/v1/update/apply':
-                    started = outer.updater.apply(body.get('version'))
+                    started = outer.updater.apply(body.get('version'),
+                                                  channel=body.get('channel') or 'stable')
                     if not started:
                         return self._json(409, {'error': 'update already running'})
                     return self._json(200, {'started': True})

@@ -24,6 +24,9 @@ class GeneralSettingsController:
             # idle-stop for live H.264 transcodes: stop after this many seconds without a
             # viewer (0 = keep always warm, the pre-idle-stop behavior)
             'live_transcode_idle_s': int(Setting.get_value('live_transcode_idle_s', 300) or 0),
+            # native-install auto-update channel: stable = releases only, beta adds
+            # -beta/-rc prereleases, alpha adds everything
+            'update_channel': Setting.get_value('update_channel', 'stable') or 'stable',
         }
 
     @classmethod
@@ -51,6 +54,13 @@ class GeneralSettingsController:
             Setting.set_value('public_base_url', url)
             AuditLog.record('settings_updated', target='public_base_url', user_id=actor.id,
                             detail={'public_base_url': url})
+        if 'update_channel' in data:
+            channel = (data.get('update_channel') or '').strip().lower()
+            if channel not in ('stable', 'beta', 'alpha'):
+                raise InvalidParameterException('update_channel must be stable, beta or alpha')
+            Setting.set_value('update_channel', channel)
+            AuditLog.record('settings_updated', target='update_channel', user_id=actor.id,
+                            detail={'update_channel': channel})
         if 'webrtc_candidate_ip' in data:
             ip = (data.get('webrtc_candidate_ip') or '').strip()
             if ip:

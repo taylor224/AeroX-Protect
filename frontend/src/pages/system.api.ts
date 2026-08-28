@@ -13,6 +13,7 @@ export interface UpdateCheck {
   notes_url?: string | null;
   installer_url?: string | null;
   checked_at?: string;
+  channel?: 'stable' | 'beta' | 'alpha';
 }
 
 export type UpdatePhase =

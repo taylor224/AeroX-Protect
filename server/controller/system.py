@@ -40,19 +40,29 @@ class SystemController:
             raise LauncherUnreachable('launcher answered %d' % r.status_code)
         return r.json()
 
+    @staticmethod
+    def _channel() -> str:
+        from server.model.setting import Setting
+        channel = (Setting.get_value('update_channel', 'stable') or 'stable').lower()
+        return channel if channel in ('stable', 'beta', 'alpha') else 'stable'
+
     @classmethod
     def check_update(cls, force: bool = False) -> dict:
-        data = cls._request('GET', '/v1/update/check' + ('?force=1' if force else ''))
+        channel = cls._channel()
+        data = cls._request('GET', '/v1/update/check?channel=%s%s'
+                            % (channel, '&force=1' if force else ''))
         data['current_version'] = config.VERSION
+        data['channel'] = channel
         return data
 
     @classmethod
     def apply_update(cls, actor, version: str | None) -> dict:
+        channel = cls._channel()
         AuditLog.record('system_update_started', target=version or 'latest',
                         user_id=actor.id if actor else None,
-                        detail={'from': config.VERSION, 'to': version})
+                        detail={'from': config.VERSION, 'to': version, 'channel': channel})
         ticket = update_ticket.issue()
-        cls._request('POST', '/v1/update/apply', json={'version': version})
+        cls._request('POST', '/v1/update/apply', json={'version': version, 'channel': channel})
         return {
             'ticket': ticket['ticket'],
             'expires_in': ticket['expires_in'],

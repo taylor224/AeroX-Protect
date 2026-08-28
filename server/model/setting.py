@@ -12,6 +12,7 @@ SETTING_SEEDS: list[tuple[str, object, str]] = [
     ('timezone', 'Asia/Seoul', '표시 시간대'),
     ('retention_default_days', 30, '기본 보존 기간(일)'),
     ('live_transcode_idle_s', 300, '라이브 트랜스코드 유휴 정지 시간(초); 0=항상 예열'),
+    ('update_channel', 'stable', '업데이트 채널 (stable/beta/alpha) — 네이티브 설치 전용'),
 ]
 
 

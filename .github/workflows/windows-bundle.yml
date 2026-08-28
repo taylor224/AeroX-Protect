@@ -112,6 +112,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release create v${{ steps.ver.outputs.version }} --generate-notes 2>$null
+          $ver = '${{ steps.ver.outputs.version }}'
+          # tags like v0.2.0-alpha.1 / -beta.1 become GitHub prereleases; the
+          # stable channel ignores them, beta/alpha machines opt in from settings
+          $flags = @('--generate-notes')
+          if ($ver -match '-') { $flags += '--prerelease' }
+          gh release create v$ver @flags 2>$null
           if ($LASTEXITCODE -ne 0) { Write-Host 'release exists' }
-          gh release upload v${{ steps.ver.outputs.version }} (Get-ChildItem build\dist -File).FullName --clobber
+          gh release upload v$ver (Get-ChildItem build\dist -File).FullName --clobber
