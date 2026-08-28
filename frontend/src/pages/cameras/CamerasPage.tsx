@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Aperture, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useIntl } from 'react-intl';
 
 import { useAuthContext } from '@/auth/useAuthContext';
@@ -88,14 +88,13 @@ export function CamerasPage() {
               <TableHead>{intl.formatMessage({ id: 'camera.model' })}</TableHead>
               <TableHead>PTZ</TableHead>
               <TableHead>{intl.formatMessage({ id: 'camera.status' })}</TableHead>
-              <TableHead className="text-right">{intl.formatMessage({ id: 'common.actions' })}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {camerasQuery.isLoading &&
               Array.from({ length: 3 }).map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell colSpan={8}>
+                  <TableCell colSpan={7}>
                     <Skeleton className="h-5 w-full" />
                   </TableCell>
                 </TableRow>
@@ -103,14 +102,17 @@ export function CamerasPage() {
 
             {!camerasQuery.isLoading && cameras.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
                   {intl.formatMessage({ id: 'camera.empty' })}
                 </TableCell>
               </TableRow>
             )}
 
             {cameras.map((cam) => (
-              <TableRow key={cam.uuid}>
+              <Fragment key={cam.uuid}>
+              {/* info row + actions row form one visual group: the info row drops its
+                  bottom border, the actions row below carries the camera separator */}
+              <TableRow className="border-b-0">
                 <TableCell>
                   <CameraThumbnail cameraUuid={cam.uuid} status={cam.status} className="h-14 w-24 rounded" />
                 </TableCell>
@@ -124,10 +126,10 @@ export function CamerasPage() {
                 <TableCell>
                   <CameraHealthBadge status={cam.status} />
                 </TableCell>
-                <TableCell>
-                  {/* fixed 4-col grid so action buttons align into uniform columns
-                      regardless of label width or which permissions are visible */}
-                  <div className="ml-auto grid w-fit grid-cols-4 gap-1 [&>button]:justify-start">
+              </TableRow>
+              <TableRow>
+                <TableCell colSpan={7} className="pb-3 pt-0">
+                  <div className="flex flex-wrap items-center gap-1">
                     {canUpdate && <CameraEditButton camera={cam} />}
                     <RecordingSettingsButton camera={cam} />
                     {canUpdate && (
@@ -170,6 +172,7 @@ export function CamerasPage() {
                   </div>
                 </TableCell>
               </TableRow>
+              </Fragment>
             ))}
           </TableBody>
         </Table>
