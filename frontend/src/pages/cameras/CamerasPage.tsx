@@ -125,7 +125,9 @@ export function CamerasPage() {
                   <CameraHealthBadge status={cam.status} />
                 </TableCell>
                 <TableCell>
-                  <div className="flex flex-wrap items-center justify-end gap-1">
+                  {/* fixed 4-col grid so action buttons align into uniform columns
+                      regardless of label width or which permissions are visible */}
+                  <div className="ml-auto grid w-fit grid-cols-4 gap-1 [&>button]:justify-start">
                     {canUpdate && <CameraEditButton camera={cam} />}
                     <RecordingSettingsButton camera={cam} />
                     {canUpdate && (
