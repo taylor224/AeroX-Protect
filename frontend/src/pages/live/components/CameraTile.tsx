@@ -1,5 +1,5 @@
 import { Gamepad2, Plus, Volume2, VolumeX, X } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useIntl } from 'react-intl';
 
@@ -94,20 +94,38 @@ export function CameraTile({
   // the grid cell and the enlarge overlay. Enlarging must NOT remount the player: a remount
   // reconnects the stream and cold-starts (spinner for seconds); a reparented <video> keeps
   // its decoder and buffer and resumes instantly.
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const portalDiv = useMemo(() => {
     const d = document.createElement('div');
     d.className = 'h-full w-full';
     return d;
   }, []);
+  const attachPortal = useCallback(
+    (host: HTMLElement | null) => {
+      if (!host || portalDiv.parentElement === host) return;
+      host.appendChild(portalDiv);
+      // some browsers pause a reparented <video>; resume the live stream in place
+      const v = portalDiv.querySelector('video');
+      if (v) void (v as HTMLVideoElement).play().catch(() => {});
+    },
+    [portalDiv],
+  );
   useLayoutEffect(() => {
-    const host = (enlarged && enlargedHost) || rootRef.current;
-    if (!host || portalDiv.parentElement === host) return;
-    host.appendChild(portalDiv);
-    // some browsers pause a reparented <video>; resume the live stream in place
-    const v = portalDiv.querySelector('video');
-    if (v) void (v as HTMLVideoElement).play().catch(() => {});
-  }, [enlarged, enlargedHost, portalDiv]);
+    attachPortal((enlarged && enlargedHost) || rootRef.current);
+  }, [enlarged, enlargedHost, attachPortal]);
+  // CALLBACK ref, not just the layout effect: the tile's first render often happens
+  // before the cameras query resolves (camera=undefined → placeholder, no shell div).
+  // The effect runs once against that render and its deps never change, so when the
+  // real shell finally mounts nothing re-attached portalDiv — the player streamed
+  // into a detached DOM and the tile stayed black. A callback ref fires on every
+  // mount of the shell, so the portal is attached no matter the load order.
+  const hostRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      rootRef.current = el;
+      if (el && !enlarged) attachPortal(el);
+    },
+    [enlarged, attachPortal],
+  );
   useEffect(() => () => portalDiv.remove(), [portalDiv]);
 
   if (!camera) {
@@ -246,7 +264,7 @@ export function CameraTile({
   // layout effect above parents into either this shell or the enlarge overlay host
   return (
     <div
-      ref={rootRef}
+      ref={hostRef}
       className={cn(
         'h-full w-full overflow-hidden rounded bg-black',
         !editMode && 'rgl-no-drag',
