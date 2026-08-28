@@ -105,7 +105,10 @@ def _process(camera, n, source: str, raw: dict) -> Event | None:
     elif n.state == 'end':
         ev = Event.get_active_by_dedup(dedup)
         if not ev:
-            ev = _create(camera, n, source, dedup, now, STATE_ENDED, raw)
+            # 'end' with no matching active event is noise — vendors emit these as
+            # keepalives (e.g. Hikvision alertStream heartbeats videoloss/inactive
+            # every few seconds), which would otherwise pile up as ENDED rows.
+            return None
         ev.close(end_ts=now)
     else:
         ev = _create(camera, n, source, dedup, now, STATE_PULSE, raw)

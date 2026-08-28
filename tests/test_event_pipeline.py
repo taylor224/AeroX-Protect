@@ -34,6 +34,15 @@ def test_state_machine_start_then_end(app_db):
     assert ended.state == STATE_ENDED and ended.end_ts is not None and ended.duration_ms is not None
 
 
+def test_end_without_active_ignored(app_db):
+    # Vendor keepalives (e.g. Hikvision alertStream videoloss/inactive heartbeats)
+    # arrive as 'end' with no matching active event — must not create rows.
+    cam = _camera()
+    assert event_pipeline.handle(cam, {'type': 'video_loss', 'state': 'end'}, 'manual') is None
+    total, _ = Event.get_list(camera_ids=[cam.id])
+    assert total == 0
+
+
 def test_duplicate_start_absorbed(app_db):
     cam = _camera()
     e1 = event_pipeline.handle(cam, {'type': 'tamper', 'state': 'start'}, 'manual')
