@@ -177,6 +177,11 @@ class Updater:
             self.state.update({'from': prev_version, 'to': target})
 
             self._set('precheck', 5)
+            if target == prev_version:
+                # Re-applying the running version would rmtree the tree the live
+                # processes are loaded from (locked .pyd → WinError 5 → half-deleted
+                # install). Field-learned the hard way; refuse outright.
+                raise RuntimeError('already on v%s' % target)
             if _vtuple(manifest.get('min_launcher_version', '0')) > _vtuple(LAUNCHER_VERSION):
                 raise RuntimeError('needs_installer')
             if _vtuple(prev_version) < _vtuple(manifest.get('min_from_version', '0')):
@@ -206,10 +211,10 @@ class Updater:
                 shutil.rmtree(tmp)
             with zipfile.ZipFile(zip_path) as zf:
                 zf.extractall(tmp)
-            if vdir.exists():
-                shutil.rmtree(vdir)
-            tmp.rename(vdir)
             zip_path.unlink(missing_ok=True)
+            # NOTE: a stale versions\v<target> from an earlier failed attempt is NOT
+            # touched here — its files may be locked by running children. It is
+            # replaced below, after stopping_app.
 
             self._set('backup_db', 72)
             if self.cfg.get('AXP_UPDATE_DB_BACKUP', 'true').lower() != 'false':
@@ -222,6 +227,12 @@ class Updater:
 
             self._set('stopping_app', 75)
             self.sup.stop_all(app_only=True)
+
+            # app tier is down → nothing holds files under a stale versions\v<target>
+            # from an earlier failed attempt; now it is safe to promote the fresh tree
+            if vdir.exists():
+                shutil.rmtree(vdir)
+            tmp.rename(vdir)
 
             self._set('migrating', 80)
             db_changed = True   # DDL may be partially applied from here on
@@ -303,13 +314,26 @@ class Updater:
         if r.returncode != 0:
             raise RuntimeError('junction swap failed: %s' % (r.stderr or r.stdout))
 
+    @staticmethod
+    def _version_dir_usable(d: Path) -> bool:
+        return (d / 'VERSION').exists() and (d / 'site-packages').is_dir() and (d / 'app').is_dir()
+
     def _rollback(self, prev_version: str, dump_path: Path | None, error: str):
         self._set('rollback', 96, error=error)
+        rolled_back = False
         try:
             self.sup.stop_all(app_only=True)
             prev_dir = env.version_dir(prev_version)
-            if prev_dir.exists():
+            target_dir = env.version_dir(self.state.get('to') or '')
+            # Only re-point if the previous tree is a DIFFERENT, intact install —
+            # swapping onto the (possibly half-deleted) failed target, or onto a
+            # gutted prev dir, leaves the machine worse than doing nothing.
+            if prev_dir != target_dir and self._version_dir_usable(prev_dir):
                 self._swap_junction(prev_dir)
+                rolled_back = True
+            else:
+                logger.error('rollback: previous version dir unusable/identical (%s) — '
+                             'junction left as-is', prev_dir)
             if dump_path is not None and dump_path.exists():
                 self._set('restoring', 97, error=error)
                 if not mariadb_init.restore(self.cfg, dump_path):
@@ -318,7 +342,8 @@ class Updater:
         except Exception:
             logger.exception('rollback itself failed')
         self._set('failed', 100, error=error,
-                  message='rolled back to v%s' % prev_version)
+                  message=('rolled back to v%s' % prev_version) if rolled_back
+                          else 'rollback unavailable — manual recovery needed (see launcher log)')
 
     def _write_installed(self, current: str, previous: str):
         env.INSTALLED_FILE.write_text(json.dumps({
@@ -329,7 +354,8 @@ class Updater:
     def _prune_versions(self, keep: set[str]):
         try:
             for d in env.VERSIONS.iterdir():
-                if d.is_dir() and d.name.lstrip('v') not in keep:
+                # stale .tmp trees from interrupted extracts are always garbage
+                if d.is_dir() and (d.name.endswith('.tmp') or d.name.lstrip('v') not in keep):
                     shutil.rmtree(d, ignore_errors=True)
         except OSError:
             pass
