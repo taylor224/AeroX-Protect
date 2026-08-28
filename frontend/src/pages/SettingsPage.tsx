@@ -773,7 +773,13 @@ function SystemUpdateCard() {
             variant="outline"
             size="sm"
             disabled={busy || check.isFetching}
-            onClick={() => void check.refetch()}
+            onClick={() => {
+              // explicit click → force=1 end-to-end so the launcher bypasses its
+              // 1h check cache (a fresh release must show up immediately)
+              void checkUpdate(true)
+                .catch(() => {})
+                .finally(() => void check.refetch());
+            }}
           >
             {intl.formatMessage({ id: 'settings.update_check_btn' })}
           </Button>

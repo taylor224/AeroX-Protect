@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_ASSET_RE = re.compile(r'^manifest-v[0-9A-Za-z.\-]+\.json$')
 CHECK_CACHE_TTL_S = 3600
-FORCED_CHECK_TTL_S = 300
 HEALTH_GATE_S = 120
 KEEP_VERSIONS = 2
 
@@ -112,9 +111,12 @@ class Updater:
 
     def check(self, force: bool = False, channel: str = 'stable') -> dict:
         now = time.time()
-        ttl = FORCED_CHECK_TTL_S if force else CHECK_CACHE_TTL_S
-        cached = self._check_cache.get(channel) if isinstance(self._check_cache, dict) else None
-        if cached is not None and now - cached['_at'] < ttl:
+        # force = the user pressed the check button — always hit GitHub; the cache
+        # only serves passive/background checks (a stale "up to date" answer on an
+        # explicit click is worse than one API call).
+        cached = None if force else (
+            self._check_cache.get(channel) if isinstance(self._check_cache, dict) else None)
+        if cached is not None and now - cached['_at'] < CHECK_CACHE_TTL_S:
             return {k: v for k, v in cached.items() if k != '_at'}
         rel = self._pick_release(channel) or {}
         latest = (rel.get('tag_name') or '').lstrip('v')
