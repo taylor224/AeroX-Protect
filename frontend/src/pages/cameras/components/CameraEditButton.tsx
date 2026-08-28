@@ -130,9 +130,10 @@ export function CameraEditButton({ camera }: { camera: Camera }) {
 
   return (
     <>
-      <Button variant="ghost" size="icon" onClick={openDialog}
+      <Button variant="ghost" size="sm" onClick={openDialog}
         title={intl.formatMessage({ id: 'camera.edit' })} aria-label="edit camera">
-        <Pencil className="h-4 w-4" />
+        <Pencil className="mr-1 h-4 w-4" />
+        {intl.formatMessage({ id: 'camera.act.edit' })}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>

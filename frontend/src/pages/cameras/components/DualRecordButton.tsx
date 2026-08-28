@@ -35,12 +35,13 @@ export function DualRecordButton({ camera }: { camera: Camera }) {
     <>
       <Button
         variant={camera.dual_recording ? 'default' : 'ghost'}
-        size="icon"
+        size="sm"
         onClick={() => setOpen(true)}
         title={intl.formatMessage({ id: 'camera.dual_recording' })}
         aria-label="dual recording"
       >
-        <Layers className="h-4 w-4" />
+        <Layers className="mr-1 h-4 w-4" />
+        {intl.formatMessage({ id: 'camera.act.dual' })}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>

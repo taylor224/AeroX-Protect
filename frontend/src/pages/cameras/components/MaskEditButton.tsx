@@ -52,9 +52,10 @@ export function MaskEditButton({ cameraUuid }: { cameraUuid: string }) {
 
   return (
     <>
-      <Button variant="ghost" size="icon" onClick={() => setOpen(true)}
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}
         title={intl.formatMessage({ id: 'camera.masks' })} aria-label="masks">
-        <Shield className="h-4 w-4" />
+        <Shield className="mr-1 h-4 w-4" />
+        {intl.formatMessage({ id: 'camera.masks' })}
       </Button>
 
       <Dialog

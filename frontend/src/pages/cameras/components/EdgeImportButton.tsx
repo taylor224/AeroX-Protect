@@ -79,12 +79,13 @@ export function EdgeImportButton({ camera }: { camera: Camera }) {
     <>
       <Button
         variant="ghost"
-        size="icon"
+        size="sm"
         onClick={() => setOpen(true)}
         title={intl.formatMessage({ id: 'edge.title' })}
         aria-label="edge recording"
       >
-        <HardDriveDownload className="h-4 w-4" />
+        <HardDriveDownload className="mr-1 h-4 w-4" />
+        {intl.formatMessage({ id: 'camera.act.edge' })}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>

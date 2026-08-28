@@ -15,14 +15,10 @@ import { BookmarkButton } from '@/pages/events/components/BookmarkButton';
 import { CameraPickGrid } from '@/pages/events/components/CameraPickGrid';
 import { ManualRecordButton } from '@/pages/events/components/ManualRecordButton';
 import { ProtectButton } from '@/pages/events/components/ProtectButton';
-import { RetentionPolicyEditor } from '@/pages/events/components/RetentionPolicyEditor';
 import { EventList } from '@/pages/events/components/EventList';
 import { ShareLinkButton } from '@/pages/events/components/ShareLinkButton';
-import { EventPolicyMatrix } from '@/pages/events/components/EventPolicyMatrix';
 import { EventTimeline } from '@/pages/events/components/EventTimeline';
 import { MotionOverlay } from '@/pages/events/components/MotionOverlay';
-import { ScheduleEditor } from '@/pages/events/components/ScheduleEditor';
-import { TimelapsePanel } from '@/pages/events/components/TimelapsePanel';
 import { getEventOverlay, getEventTimeline, listEvents } from '@/pages/events/events.api';
 import { eventColor } from '@/pages/events/eventMeta';
 import { ExportPanel } from '@/pages/playback/components/ExportPanel';
@@ -38,8 +34,6 @@ const PRESETS = [
   { key: '24h', ms: 24 * HOUR },
 ];
 const FILTER_TYPES = ['motion', 'line_crossing', 'intrusion', 'tamper', 'object'];
-type Tab = 'events' | 'schedule' | 'policies' | 'retention' | 'timelapse';
-
 const pad = (n: number) => String(n).padStart(2, '0');
 const toLocalInput = (ms: number) => {
   const d = new Date(ms);
@@ -51,9 +45,6 @@ export function EventsPage() {
   const intl = useIntl();
   const queryClient = useQueryClient();
   const { hasPermission } = useAuthContext();
-  const canSchedule = hasPermission('schedules', 'update');
-  const canPolicy = hasPermission('policies', 'update');
-  const canTimelapse = hasPermission('timelapse', 'create');
   const canControl = hasPermission('recordings', 'control');
   const canExport = hasPermission('clips', 'export');
   const bookmarksEnabled = useFeatureFlag('bookmarks');
@@ -62,7 +53,6 @@ export function EventsPage() {
   const canShare = hasPermission('share', 'create');
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState<Tab>('events');
   const [cameraUuid, setCameraUuid] = useState(searchParams.get('camera') ?? '');
   const [from, setFrom] = useState(() => Date.now() - 6 * HOUR);
   const [to, setTo] = useState(() => Date.now());
@@ -88,7 +78,6 @@ export function EventsPage() {
     setCameraUuid(uuid);
     setSelected(null);
     setPlayhead(null);
-    setTab('events');
     setSearchParams({ camera: uuid }, { replace: true });
   };
   const backToList = () => {
@@ -108,13 +97,13 @@ export function EventsPage() {
         end: to,
         hasRecording: onlyClips ? true : undefined,
       }),
-    enabled: !!cameraId && tab === 'events',
+    enabled: !!cameraId,
   });
 
   const timelineQuery = useQuery({
     queryKey: ['event-timeline', selectedUuid, from, to, types],
     queryFn: () => getEventTimeline(selectedUuid, from, to, types.length ? types : undefined),
-    enabled: !!selectedUuid && tab === 'events',
+    enabled: !!selectedUuid,
   });
 
   const overlayQuery = useQuery({
@@ -130,7 +119,7 @@ export function EventsPage() {
   const segmentsQuery = useQuery({
     queryKey: ['event-segments', selectedUuid, from, to],
     queryFn: () => getSegments(selectedUuid, from, to),
-    enabled: !!selectedUuid && tab === 'events',
+    enabled: !!selectedUuid,
   });
 
   // recording controls (merged from the former Playback page)
@@ -146,7 +135,7 @@ export function EventsPage() {
   const bookmarksQuery = useQuery({
     queryKey: ['bookmarks', selectedUuid, from, to],
     queryFn: () => listBookmarks(selectedUuid, from, to),
-    enabled: bookmarksEnabled && !!selectedUuid && tab === 'events',
+    enabled: bookmarksEnabled && !!selectedUuid,
   });
 
   const events = useMemo(() => eventsQuery.data?.items ?? [], [eventsQuery.data]);
@@ -170,14 +159,6 @@ export function EventsPage() {
 
   const toggleType = (t: string) =>
     setTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
-
-  const tabs: { key: Tab; show: boolean }[] = [
-    { key: 'events', show: true },
-    { key: 'schedule', show: hasPermission('schedules', 'read') },
-    { key: 'policies', show: hasPermission('policies', 'read') },
-    { key: 'retention', show: hasPermission('storage', 'read') },
-    { key: 'timelapse', show: hasPermission('timelapse', 'read') },
-  ];
 
   // ── entry: camera grid ──────────────────────────────────────────────────────
   if (!selectedUuid) {
@@ -204,25 +185,9 @@ export function EventsPage() {
         </h1>
         {status && <RecorderStatusBadge health={status.health} />}
         <div className="flex-1" />
-        <div className="flex items-center gap-1 rounded border border-border p-0.5">
-          {tabs
-            .filter((t) => t.show)
-            .map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`rounded px-3 py-1 text-sm transition-colors ${
-                  tab === t.key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary'
-                }`}
-              >
-                {intl.formatMessage({ id: `event.tab.${t.key}` })}
-              </button>
-            ))}
-        </div>
       </div>
 
-      {tab === 'events' ? (
-        <>
+      <>
           {/* time range — direct date/time + quick presets */}
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -342,16 +307,7 @@ export function EventsPage() {
           <Card className="overflow-hidden">
             <EventList events={events} selectedId={selected?.id ?? null} onSelect={selectEvent} />
           </Card>
-        </>
-      ) : tab === 'schedule' ? (
-        <ScheduleEditor cameraUuid={selectedUuid} canEdit={canSchedule} />
-      ) : tab === 'policies' ? (
-        <EventPolicyMatrix cameraUuid={selectedUuid} cameraName={selectedCamera?.name ?? ''} canEdit={canPolicy} />
-      ) : tab === 'retention' ? (
-        <RetentionPolicyEditor cameraUuid={selectedUuid} canEdit={hasPermission('retention', 'manage')} />
-      ) : (
-        <TimelapsePanel cameraUuid={selectedUuid} canCreate={canTimelapse} />
-      )}
+      </>
     </div>
   );
 }

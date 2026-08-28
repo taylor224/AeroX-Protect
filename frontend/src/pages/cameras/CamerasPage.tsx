@@ -23,6 +23,7 @@ import { CameraHealthBadge } from '@/pages/cameras/components/CameraHealthBadge'
 import { DualRecordButton } from '@/pages/cameras/components/DualRecordButton';
 import { EdgeImportButton } from '@/pages/cameras/components/EdgeImportButton';
 import { MaskEditButton } from '@/pages/cameras/components/MaskEditButton';
+import { RecordingSettingsButton } from '@/pages/cameras/components/RecordingSettingsButton';
 import type { Camera } from '@/types/axp';
 
 export function CamerasPage() {
@@ -124,17 +125,19 @@ export function CamerasPage() {
                   <CameraHealthBadge status={cam.status} />
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">
+                  <div className="flex flex-wrap items-center justify-end gap-1">
                     {canUpdate && <CameraEditButton camera={cam} />}
+                    <RecordingSettingsButton camera={cam} />
                     {canUpdate && (
                       <Button
                         variant={cam.fisheye ? 'default' : 'ghost'}
-                        size="icon"
+                        size="sm"
                         onClick={() => setFisheyeConfirm(cam)}
                         title={intl.formatMessage({ id: 'camera.fisheye' })}
                         aria-label="fisheye"
                       >
-                        <Aperture className="h-4 w-4" />
+                        <Aperture className="mr-1 h-4 w-4" />
+                        {intl.formatMessage({ id: 'camera.act.fisheye' })}
                       </Button>
                     )}
                     {canUpdate && <DualRecordButton camera={cam} />}
@@ -144,7 +147,7 @@ export function CamerasPage() {
                     {canDelete && (
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="sm"
                         onClick={async () => {
                           if (
                             await confirm({
@@ -158,7 +161,8 @@ export function CamerasPage() {
                         }}
                         aria-label="delete"
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                        <Trash2 className="mr-1 h-4 w-4 text-destructive" />
+                        <span className="text-destructive">{intl.formatMessage({ id: 'common.delete' })}</span>
                       </Button>
                     )}
                   </div>

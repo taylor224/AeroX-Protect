@@ -42,12 +42,13 @@ export function CameraAiButton({ camera }: { camera: Camera }) {
     <>
       <Button
         variant={anyOn ? 'default' : 'ghost'}
-        size="icon"
+        size="sm"
         onClick={() => setOpen(true)}
         title={intl.formatMessage({ id: 'camera.ai_features' })}
         aria-label="ai features"
       >
-        <span className="text-xs font-semibold tracking-wide">AI</span>
+        <span className="mr-1 text-xs font-semibold tracking-wide">AI</span>
+        {intl.formatMessage({ id: 'camera.act.ai' })}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
