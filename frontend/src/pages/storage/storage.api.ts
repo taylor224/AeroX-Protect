@@ -36,6 +36,21 @@ export async function deleteDisk(id: string, mode: 'unregister' | 'evacuate'): P
   await api.delete(`/storage/disks/${id}`, { data: { mode } });
 }
 
+/** Per-camera stored bytes + applicable retention limits (camera override → global). */
+export interface CameraUsage {
+  uuid: string;
+  name: string;
+  used_bytes: number;
+  retention_max_bytes: number | null;
+  retention_days: number | null;
+  has_override: boolean;
+}
+
+export async function getStorageUsage(): Promise<CameraUsage[]> {
+  const { data } = await api.get<ApiResponse<{ cameras: CameraUsage[] }>>('/storage/usage');
+  return data.data?.cameras ?? [];
+}
+
 export async function getPolicy(cameraUuid: string): Promise<StoragePolicy> {
   const { data } = await api.get<ApiResponse<StoragePolicy>>(`/storage/policies/${cameraUuid}`);
   return data.data as StoragePolicy;

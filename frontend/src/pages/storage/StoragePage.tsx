@@ -10,13 +10,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { listCameras } from '@/pages/cameras/camera.api';
 import {
   discoverDisks,
   getPolicy,
+  getStorageUsage,
   listDisks,
   registerDisk,
   updatePolicy,
+  type CameraUsage,
 } from '@/pages/storage/storage.api';
 import type { DiscoverCandidate } from '@/types/p2';
 
@@ -119,46 +120,31 @@ export function StoragePage() {
         )}
       </div>
 
-      <RaidGuidanceCard />
-
       {canRetention && <RetentionSettings />}
     </div>
   );
 }
 
-function RaidGuidanceCard() {
-  const intl = useIntl();
-  return (
-    <Card className="p-5">
-      <details>
-        <summary className="cursor-pointer text-sm font-medium text-foreground">
-          {intl.formatMessage({ id: 'storage.raid.title' })}
-        </summary>
-        <div className="mt-3 space-y-2 text-xs leading-relaxed text-muted-foreground">
-          <p>{intl.formatMessage({ id: 'storage.raid.intro' })}</p>
-          <ul className="list-disc space-y-1 pl-5">
-            <li>{intl.formatMessage({ id: 'storage.raid.mdadm' })}</li>
-            <li>{intl.formatMessage({ id: 'storage.raid.zfs' })}</li>
-            <li>{intl.formatMessage({ id: 'storage.raid.degraded' })}</li>
-            <li>{intl.formatMessage({ id: 'storage.raid.smart' })}</li>
-            <li>{intl.formatMessage({ id: 'storage.raid.encryption' })}</li>
-          </ul>
-        </div>
-      </details>
-    </Card>
-  );
-}
+// '10.2/30GB' — stored bytes vs the retention cap that applies (∞-less when uncapped)
+const fmtUsage = (c: CameraUsage) => {
+  const used = (c.used_bytes / GB).toFixed(1);
+  return c.retention_max_bytes ? `${used}/${Math.round(c.retention_max_bytes / GB)}GB` : `${used}GB`;
+};
 
 function RetentionSettings() {
   const intl = useIntl();
+  const queryClient = useQueryClient();
   const [cameraUuid, setCameraUuid] = useState('');
+  const [search, setSearch] = useState('');
   const [days, setDays] = useState('');
   const [maxGb, setMaxGb] = useState('');
   const [overPolicy, setOverPolicy] = useState('delete_oldest');
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  const camerasQuery = useQuery({ queryKey: ['cameras'], queryFn: () => listCameras() });
-  const cameras = camerasQuery.data?.items ?? [];
+  const usageQuery = useQuery({ queryKey: ['storage-usage'], queryFn: getStorageUsage });
+  const cameras = usageQuery.data ?? [];
+  const q = search.trim().toLowerCase();
+  const filtered = q ? cameras.filter((c) => c.name.toLowerCase().includes(q)) : cameras;
   const selected = cameraUuid || cameras[0]?.uuid || '';
 
   const policyQuery = useQuery({
@@ -185,6 +171,7 @@ function RetentionSettings() {
       }),
     onSuccess: (p) => {
       setWarnings(p.warnings ?? []);
+      void queryClient.invalidateQueries({ queryKey: ['storage-usage'] });
       toast.success(intl.formatMessage({ id: 'storage.policy_saved' }));
     },
   });
@@ -195,21 +182,55 @@ function RetentionSettings() {
         <CardTitle className="text-base">{intl.formatMessage({ id: 'storage.retention' })}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div className="space-y-2">
-            <Label>{intl.formatMessage({ id: 'camera.name' })}</Label>
-            <select
-              className="h-10 w-full rounded border border-input bg-background px-2 text-sm"
-              value={selected}
-              onChange={(e) => setCameraUuid(e.target.value)}
-            >
-              {cameras.map((c) => (
-                <option key={c.uuid} value={c.uuid}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <Input
+          className="max-w-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={intl.formatMessage({ id: 'common.search' })}
+        />
+        <div className="max-h-80 overflow-y-auto rounded border border-border">
+          {filtered.map((c) => {
+            const pct = c.retention_max_bytes ? Math.min(100, (c.used_bytes / c.retention_max_bytes) * 100) : null;
+            return (
+              <button
+                key={c.uuid}
+                type="button"
+                onClick={() => setCameraUuid(c.uuid)}
+                className={`flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-secondary/60 ${
+                  c.uuid === selected ? 'bg-secondary' : ''
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate font-medium text-foreground">{c.name}</span>
+                {c.has_override && (
+                  <Badge variant="outline">{intl.formatMessage({ id: 'storage.policy_override' })}</Badge>
+                )}
+                {c.retention_days != null && (
+                  <span className="text-xs text-muted-foreground">
+                    {intl.formatMessage({ id: 'storage.retention_days' })} {c.retention_days}
+                  </span>
+                )}
+                {pct != null && (
+                  <span className="h-1.5 w-20 overflow-hidden rounded bg-muted">
+                    <span
+                      className={`block h-full ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-primary'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </span>
+                )}
+                <span className="w-24 text-right tabular-nums text-muted-foreground">{fmtUsage(c)}</span>
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <p className="p-4 text-center text-sm text-muted-foreground">
+              {intl.formatMessage({ id: 'camera.empty' })}
+            </p>
+          )}
+        </div>
+        <p className="text-sm font-medium text-foreground">
+          {cameras.find((c) => c.uuid === selected)?.name ?? ''}
+        </p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="space-y-2">
             <Label>{intl.formatMessage({ id: 'storage.retention_days' })}</Label>
             <Input type="number" value={days} onChange={(e) => setDays(e.target.value)} placeholder="∞" />

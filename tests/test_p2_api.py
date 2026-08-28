@@ -40,6 +40,28 @@ def test_policy_update(client, mock_go2rtc):
     assert 'warnings' in r.json['data']
 
 
+def test_camera_usage_list(client, mock_go2rtc):
+    from datetime import timedelta as td
+    from server.model.segment import Segment
+    h = login(client)
+    cam = _create_camera(client, h)
+    now = utcnow()
+    for i, size in enumerate((3 * 1024 ** 3, 2 * 1024 ** 3)):
+        Segment.create(camera_id=int(cam['id']), disk_id=1, rel_path='u%d.mp4' % i,
+                       start_ts=now - td(minutes=i + 1), end_ts=now - td(minutes=i),
+                       duration_ms=60_000, size_bytes=size)
+    client.put(f"/api/v1/storage/policies/{cam['uuid']}", headers=h,
+               json={'retention_max_bytes': 30 * 1024 ** 3, 'retention_days': 7})
+    r = client.get('/api/v1/storage/usage', headers=h)
+    assert r.status_code == 200
+    row = next(c for c in r.json['data']['cameras'] if c['uuid'] == cam['uuid'])
+    assert row['used_bytes'] == 5 * 1024 ** 3
+    assert row['retention_max_bytes'] == 30 * 1024 ** 3
+    assert row['retention_days'] == 7
+    assert row['has_override'] is True
+    assert row['name'] == 'Rec'
+
+
 def test_storage_requires_permission(client):
     h = login(client)
     create_user(client, h, 'nostorage', {'cameras': ['read']})

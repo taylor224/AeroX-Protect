@@ -84,6 +84,12 @@ class Segment(SnowflakeMixin, BaseDB):
             cls.camera_id == camera_id).scalar() or 0)
 
     @classmethod
+    def sizes_by_camera(cls) -> dict[int, int]:
+        """{camera_id: total stored bytes} in one grouped query (storage usage list)."""
+        rows = db.session.query(cls.camera_id, func.sum(cls.size_bytes)).group_by(cls.camera_id).all()
+        return {int(cid): int(total or 0) for cid, total in rows}
+
+    @classmethod
     def cache_tier_older_than(cls, cutoff: datetime, limit: int = 500) -> list[Self]:
         return db.session.query(cls).filter(
             cls.storage_tier == TIER_CACHE, cls.end_ts < cutoff).order_by(cls.start_ts.asc()).limit(limit).all()

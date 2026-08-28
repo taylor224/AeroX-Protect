@@ -73,6 +73,14 @@ def get_policies():
     return ResponseBuilder.success(StorageController.get_policies())
 
 
+@context.route('/usage', methods=('GET',))
+@login_required
+@permission_required('storage', 'read')
+@map_errors
+def camera_usage():
+    return ResponseBuilder.success({'cameras': StorageController.camera_usage()})
+
+
 @context.route('/policies/<camera_uuid>', methods=('GET',))
 @login_required
 @permission_required('storage', 'read')

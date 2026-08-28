@@ -114,6 +114,30 @@ class StorageController:
         return {'global': global_pol.to_dict() if global_pol else None, 'cameras': per_camera}
 
     @classmethod
+    def camera_usage(cls) -> list[dict]:
+        """Per-camera stored bytes + the retention limits that apply (camera
+        override falling back to the global policy) — the storage page's
+        retention list renders '10.2/30GB' from this."""
+        from server.model.camera import Camera
+        from server.model.segment import Segment
+        sizes = Segment.sizes_by_camera()
+        global_pol = StoragePolicy.get_global()
+        g_max = global_pol.retention_max_bytes if global_pol else None
+        g_days = global_pol.retention_days if global_pol else None
+        out = []
+        for cam in Camera.get_all_enabled():
+            raw = StoragePolicy.get_raw_for_camera(cam.id)
+            out.append({
+                'uuid': cam.uuid,
+                'name': cam.name,
+                'used_bytes': sizes.get(cam.id, 0),
+                'retention_max_bytes': raw.retention_max_bytes if raw and raw.retention_max_bytes is not None else g_max,
+                'retention_days': raw.retention_days if raw and raw.retention_days is not None else g_days,
+                'has_override': raw is not None,
+            })
+        return out
+
+    @classmethod
     def get_policy(cls, camera_id: int | None) -> dict:
         pol = StoragePolicy.get_for_camera(camera_id) if camera_id else StoragePolicy.get_global()
         return pol.to_dict() if pol else {}
