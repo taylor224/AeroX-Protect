@@ -22,6 +22,18 @@ class LauncherUnreachable(RuntimeError):
     pass
 
 
+class UpdateAlreadyRunning(RuntimeError):
+    pass
+
+
+# launcher phases that mean an update is in flight (everything but terminal/idle)
+_ACTIVE_PHASES = frozenset((
+    'checking', 'precheck', 'downloading', 'verifying', 'extracting',
+    'backup_db', 'stopping_app', 'migrating', 'swapping', 'starting', 'health',
+    'rollback', 'restoring',
+))
+
+
 class SystemController:
 
     @staticmethod
@@ -36,6 +48,8 @@ class SystemController:
             r = requests.request(method, url, headers=headers, timeout=_TIMEOUT, **kwargs)
         except requests.RequestException as e:
             raise LauncherUnreachable(str(e)) from e
+        if r.status_code == 409:
+            raise UpdateAlreadyRunning()
         if r.status_code >= 400:
             raise LauncherUnreachable('launcher answered %d' % r.status_code)
         return r.json()
@@ -58,11 +72,13 @@ class SystemController:
     @classmethod
     def apply_update(cls, actor, version: str | None) -> dict:
         channel = cls._channel()
+        # launcher holds the update lock and 409s a second apply — that raises
+        # UpdateAlreadyRunning here, so the audit entry only records real starts
+        cls._request('POST', '/v1/update/apply', json={'version': version, 'channel': channel})
         AuditLog.record('system_update_started', target=version or 'latest',
                         user_id=actor.id if actor else None,
                         detail={'from': config.VERSION, 'to': version, 'channel': channel})
         ticket = update_ticket.issue()
-        cls._request('POST', '/v1/update/apply', json={'version': version, 'channel': channel})
         return {
             'ticket': ticket['ticket'],
             'expires_in': ticket['expires_in'],
@@ -74,7 +90,14 @@ class SystemController:
 
     @classmethod
     def update_status(cls) -> dict:
-        return cls._request('GET', '/v1/update/status')
+        data = cls._request('GET', '/v1/update/status')
+        if data.get('phase') in _ACTIVE_PHASES:
+            # an update someone else (other tab/user) started is in flight — hand
+            # the caller a poll ticket so its UI can attach to the progress
+            ticket = update_ticket.issue()
+            data['ticket'] = ticket['ticket']
+            data['poll_url'] = '/updater/v1/update/status'
+        return data
 
     @classmethod
     def services(cls) -> dict:

@@ -48,6 +48,15 @@ export async function applyUpdate(version?: string | null): Promise<ApplyResult>
   return data.data as ApplyResult;
 }
 
+/** Update currently in flight (launcher-side)? While one is running the backend
+ *  includes a poll ticket so a freshly mounted UI can re-attach to its progress. */
+export type RunningUpdate = UpdateStatus & { ticket?: string; poll_url?: string };
+
+export async function getUpdateStatus(): Promise<RunningUpdate> {
+  const { data } = await api.get<ApiResponse<RunningUpdate>>('/system/update/status');
+  return data.data as RunningUpdate;
+}
+
 /**
  * Poll the launcher's update progress THROUGH the reverse proxy (/updater/* →
  * launcher loopback API) with the HMAC ticket from applyUpdate. Deliberately a

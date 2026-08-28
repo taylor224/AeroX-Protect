@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { toast } from 'sonner';
@@ -24,6 +25,7 @@ import {
   applyUpdate,
   checkUpdate,
   fetchHealthzVersion,
+  getUpdateStatus,
   pollUpdaterStatus,
   type ApplyResult,
   type UpdateStatus,
@@ -646,6 +648,24 @@ function SystemUpdateCard() {
   const [restarting, setRestarting] = useState(false);
   const [failed, setFailed] = useState<UpdateStatus | null>(null);
 
+  // an update started before navigating away (or in another tab) survives this
+  // component: the status endpoint returns a poll ticket while one is in flight,
+  // so a fresh mount re-attaches to the progress instead of re-offering the button
+  const running = useQuery({
+    queryKey: ['system-update-status'],
+    queryFn: getUpdateStatus,
+    enabled: !!check.data && !applying,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  useEffect(() => {
+    const s = running.data;
+    if (!s?.ticket || !s.poll_url || applying) return;
+    setFailed(null);
+    setProgress(s);
+    setApplying({ ticket: s.ticket, expires_in: 0, poll_url: s.poll_url });
+  }, [running.data, applying]);
+
   useEffect(() => {
     if (!applying) return;
     let stopped = false;
@@ -690,12 +710,21 @@ function SystemUpdateCard() {
       setProgress({ phase: 'checking', percent: 0 });
       setApplying(r);
     },
-    onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
+    onError: (e) => {
+      // 409 = an update is already running (launcher lock) — attach, don't error
+      if (isAxiosError(e) && e.response?.status === 409) {
+        void running.refetch();
+        return;
+      }
+      toast.error(intl.formatMessage({ id: 'common.error' }));
+    },
   });
 
   if (check.isError || !check.data) return null; // Docker / no launcher → hide
   const d = check.data;
-  const busy = applying !== null || applyMut.isPending;
+  // also busy while the initial in-flight probe loads / says an update is running,
+  // so the apply button can't flash enabled on remount mid-update
+  const busy = applying !== null || applyMut.isPending || running.isLoading || !!running.data?.ticket;
   const phaseId = progress ? UPDATE_PHASE_IDS[progress.phase] : undefined;
 
   return (

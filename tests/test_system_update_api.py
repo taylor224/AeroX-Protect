@@ -97,6 +97,46 @@ def test_apply_returns_ticket_and_poll_url(client, monkeypatch):
     assert ('POST', '/v1/update/apply') in calls
 
 
+def test_apply_conflict_when_update_already_running(client, monkeypatch):
+    monkeypatch.setattr(config, 'LAUNCHER_URL', 'http://127.0.0.1:10099')
+    monkeypatch.setattr(config, 'LAUNCHER_TOKEN', 'tok')
+    from server.controller.system import SystemController, UpdateAlreadyRunning
+
+    def _raise(cls, method, path, **kw):
+        raise UpdateAlreadyRunning()
+    monkeypatch.setattr(SystemController, '_request', classmethod(_raise))
+    headers = login(client)
+    res = client.post('/api/v1/system/update/apply', headers=headers, json={})
+    assert res.status_code == 409
+    assert res.json['message'] == 'update_already_running'
+
+
+def test_status_includes_ticket_while_running(client, monkeypatch):
+    monkeypatch.setattr(config, 'LAUNCHER_URL', 'http://127.0.0.1:10099')
+    monkeypatch.setattr(config, 'LAUNCHER_TOKEN', 'tok')
+    from server.controller.system import SystemController
+    monkeypatch.setattr(SystemController, '_request', classmethod(
+        lambda cls, method, path, **kw: {'phase': 'downloading', 'percent': 40}))
+    headers = login(client)
+    res = client.get('/api/v1/system/update/status', headers=headers)
+    assert res.status_code == 200
+    data = res.json['data']
+    assert update_ticket.verify(data['ticket'])
+    assert data['poll_url'] == '/updater/v1/update/status'
+
+
+def test_status_no_ticket_when_idle(client, monkeypatch):
+    monkeypatch.setattr(config, 'LAUNCHER_URL', 'http://127.0.0.1:10099')
+    monkeypatch.setattr(config, 'LAUNCHER_TOKEN', 'tok')
+    from server.controller.system import SystemController
+    monkeypatch.setattr(SystemController, '_request', classmethod(
+        lambda cls, method, path, **kw: {'phase': 'idle', 'percent': 0}))
+    headers = login(client)
+    res = client.get('/api/v1/system/update/status', headers=headers)
+    assert res.status_code == 200
+    assert 'ticket' not in res.json['data']
+
+
 def test_launcher_unreachable_maps_to_500(client, monkeypatch):
     monkeypatch.setattr(config, 'LAUNCHER_URL', 'http://127.0.0.1:1')   # closed port
     monkeypatch.setattr(config, 'LAUNCHER_TOKEN', 'tok')

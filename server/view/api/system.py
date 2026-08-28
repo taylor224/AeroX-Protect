@@ -7,7 +7,7 @@ through /updater/* while the backend itself restarts.
 """
 from flask import Blueprint, g, request
 
-from server.controller.system import LauncherUnreachable, SystemController
+from server.controller.system import LauncherUnreachable, SystemController, UpdateAlreadyRunning
 from server.decorator import login_required, permission_required
 from server.view.errors import map_errors
 from server.view.response import ResponseBuilder
@@ -46,6 +46,8 @@ def apply_update():
     try:
         return ResponseBuilder.success(
             SystemController.apply_update(g.current_user, body.get('version')))
+    except UpdateAlreadyRunning:
+        return ResponseBuilder.conflict('update_already_running')
     except LauncherUnreachable:
         return ResponseBuilder.internal_server_error('launcher_unreachable')
 
