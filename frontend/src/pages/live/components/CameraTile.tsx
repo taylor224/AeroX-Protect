@@ -206,8 +206,10 @@ export function CameraTile({
           title={intl.formatMessage({ id: 'live.quality.toggle' })}
           aria-label="stream quality"
           className={cn(
-            'rgl-no-drag absolute bottom-1.5 left-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold backdrop-blur',
-            streamRole === 'main' ? 'bg-primary/80 text-white' : 'bg-black/60 text-white/80 hover:text-white',
+            'rgl-no-drag absolute bottom-2 left-2 rounded-md border px-2.5 py-1 text-sm font-semibold shadow-sm backdrop-blur transition-colors',
+            streamRole === 'main'
+              ? 'border-primary bg-primary/90 text-white hover:bg-primary'
+              : 'border-white/30 bg-black/60 text-white/90 hover:bg-black/80 hover:text-white',
           )}
         >
           {intl.formatMessage({ id: streamRole === 'main' ? 'live.quality.hd' : 'live.quality.sd' })}
