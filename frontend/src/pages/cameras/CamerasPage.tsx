@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Aperture, Trash2 } from 'lucide-react';
+import { Aperture, MoreHorizontal, Trash2 } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { useIntl } from 'react-intl';
 
@@ -10,6 +10,12 @@ import { useConfirm } from '@/components/ConfirmProvider';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useFeatureFlag } from '@/lib/featureFlags';
@@ -149,25 +155,32 @@ export function CamerasPage() {
                     {canRecControl && <EdgeImportButton camera={cam} />}
                     {masksEnabled && canMasks && <MaskEditButton cameraUuid={cam.uuid} />}
                     {canDelete && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={async () => {
-                          if (
-                            await confirm({
-                              title: intl.formatMessage({ id: 'confirm.delete.title' }),
-                              description: intl.formatMessage({ id: 'confirm.delete.named' }, { name: cam.name }),
-                              confirmLabel: intl.formatMessage({ id: 'common.delete' }),
-                              destructive: true,
-                            })
-                          )
-                            delMutation.mutate(cam.uuid);
-                        }}
-                        aria-label="delete"
-                      >
-                        <Trash2 className="mr-1 h-4 w-4 text-destructive" />
-                        <span className="text-destructive">{intl.formatMessage({ id: 'common.delete' })}</span>
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="ml-auto" aria-label="more actions">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={async () => {
+                              if (
+                                await confirm({
+                                  title: intl.formatMessage({ id: 'confirm.delete.title' }),
+                                  description: intl.formatMessage({ id: 'confirm.delete.named' }, { name: cam.name }),
+                                  confirmLabel: intl.formatMessage({ id: 'common.delete' }),
+                                  destructive: true,
+                                })
+                              )
+                                delMutation.mutate(cam.uuid);
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            {intl.formatMessage({ id: 'common.delete' })}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                   </div>
                 </TableCell>
