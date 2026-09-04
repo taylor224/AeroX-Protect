@@ -34,6 +34,7 @@ export async function semanticReindex(cameraId?: string): Promise<{ indexed: num
 export interface ClipModelStatus {
   supported: boolean;
   installed: boolean;
+  installed_variant: 'cpu' | 'cuda' | null;
   phase: 'idle' | 'installing' | 'warming' | 'done' | 'error';
   variant: string | null;
   error: string | null;
@@ -48,4 +49,11 @@ export async function getClipModelStatus(): Promise<ClipModelStatus> {
 
 export async function installClipModel(variant: 'cpu' | 'cuda'): Promise<void> {
   await api.post('/search/semantic/model/install', { variant });
+}
+
+export async function removeClipModel(): Promise<{ removed: boolean; restart_required: boolean }> {
+  const { data } = await api.delete<ApiResponse<{ removed: boolean; restart_required: boolean }>>(
+    '/search/semantic/model',
+  );
+  return data.data as { removed: boolean; restart_required: boolean };
 }

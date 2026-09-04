@@ -47,3 +47,21 @@ def semantic_model_install():
     if not data['started']:
         return ResponseBuilder.conflict('install_already_running')
     return ResponseBuilder.success(data)
+
+
+@context.route('/semantic/model', methods=('DELETE',))
+@login_required
+@permission_required('settings', 'update')
+@map_errors
+def semantic_model_remove():
+    from server.service import ai_model_setup
+    if not ai_model_setup.supported():
+        r = ResponseBuilder.internal_server_error('platform_unsupported')
+        r.status_code = 501
+        return r
+    try:
+        return ResponseBuilder.success(SemanticSearchController.model_remove(g.current_user))
+    except RuntimeError as e:
+        if str(e) == 'install_running':
+            return ResponseBuilder.conflict('install_running')
+        raise

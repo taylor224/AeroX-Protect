@@ -122,6 +122,17 @@ AI_EXTRAS_DIR = os.getenv('AXP_AI_EXTRAS_DIR') or (
     os.path.join(os.environ['AXP_HOME'], 'extras', 'site-packages-ai')
     if os.getenv('AXP_HOME') else None)
 if AI_EXTRAS_DIR:
+    # a web-admin uninstall that hit Windows file locks (torch DLLs loaded) defers
+    # to here: finish the delete before anything from the extras dir is importable
+    _pending_remove = os.path.join(os.path.dirname(AI_EXTRAS_DIR), '.remove-pending')
+    if os.path.exists(_pending_remove):
+        import shutil
+        shutil.rmtree(AI_EXTRAS_DIR, ignore_errors=True)
+        shutil.rmtree(os.path.join(os.path.dirname(AI_EXTRAS_DIR), 'hf-cache'), ignore_errors=True)
+        try:
+            os.remove(_pending_remove)
+        except OSError:
+            pass
     # self-serve what a newer launcher would inject: importable deps + a
     # weight-cache location that both survive version-junction swaps
     os.environ.setdefault('HF_HOME', os.path.join(os.path.dirname(AI_EXTRAS_DIR), 'hf-cache'))

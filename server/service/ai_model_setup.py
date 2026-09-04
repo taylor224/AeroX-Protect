@@ -13,6 +13,7 @@ One job at a time, state in module memory: the status endpoint reports
 """
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -50,11 +51,52 @@ def installed() -> bool:
     return (root / 'open_clip').is_dir() and (root / 'torch').is_dir()
 
 
+def installed_variant() -> str | None:
+    """Variant marker written after a successful install (None = unknown/legacy)."""
+    if not installed():
+        return None
+    try:
+        v = (Path(config.AI_EXTRAS_DIR) / '.variant').read_text(encoding='utf-8').strip()
+        return v if v in _TORCH_INDEX else None
+    except OSError:
+        return None
+
+
+def remove() -> dict:
+    """Delete the CLIP install (packages + weight cache) and pin the backend to hash.
+
+    On Windows a previously-used model means torch DLLs are file-locked by this
+    process — then we leave a marker and config.py finishes the cleanup on the next
+    service start, before anything from the extras dir gets imported.
+    """
+    if not supported():
+        raise RuntimeError('platform_unsupported')
+    with _lock:
+        if _state['phase'] in ('installing', 'warming'):
+            raise RuntimeError('install_running')
+        _state.update(phase='idle', variant=None, error=None)
+        _state['log'].clear()
+    semantic_embed.deactivate()
+
+    extras = Path(config.AI_EXTRAS_DIR)
+    cache = extras.parent / 'hf-cache'
+    shutil.rmtree(extras, ignore_errors=True)
+    shutil.rmtree(cache, ignore_errors=True)
+    if extras.exists() or cache.exists():
+        try:
+            (extras.parent / '.remove-pending').write_text('1', encoding='utf-8')
+        except OSError:
+            pass
+        return {'removed': False, 'restart_required': True}
+    return {'removed': True, 'restart_required': False}
+
+
 def status() -> dict:
     with _lock:
         return {
             'supported': supported(),
             'installed': installed(),
+            'installed_variant': installed_variant(),
             'phase': _state['phase'],
             'variant': _state['variant'],
             'error': _state['error'],
@@ -93,8 +135,18 @@ def _fail(message: str) -> None:
 
 def _run(variant: str) -> None:
     extras = Path(config.AI_EXTRAS_DIR)
+    # fresh dir per install: switching CPU↔CUDA must not leave the other variant's
+    # torch libs behind (pip --target can't uninstall). hf-cache stays — the
+    # ViT-B-32 weights are variant-independent. Locked DLLs (model used since
+    # boot) surface as pip file errors below → the UI says restart first.
+    shutil.rmtree(extras, ignore_errors=True)
+    if extras.exists():
+        return _fail('extras dir is in use — restart services, then reinstall')
     try:
         extras.mkdir(parents=True, exist_ok=True)
+        pending = extras.parent / '.remove-pending'
+        if pending.exists():
+            pending.unlink()
     except OSError as e:
         return _fail('extras dir not writable: %s' % e)
 
@@ -128,6 +180,10 @@ def _run(variant: str) -> None:
         return _fail('model load failed: %s' % e)
     if backend != 'clip':
         return _fail('deps installed but CLIP did not activate (check log)')
+    try:
+        (extras / '.variant').write_text(variant, encoding='utf-8')
+    except OSError:
+        pass
     _log('CLIP backend active')
     with _lock:
         _state['phase'] = 'done'

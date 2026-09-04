@@ -18,7 +18,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       <AuthProvider>
         <TranslationProvider>
           <ConfirmProvider>
-            <BrowserRouter>{children}</BrowserRouter>
+            {/* v7_startTransition: lazy-route navigations keep the current page rendered
+                until the chunk arrives instead of flashing the Suspense fallback */}
+            <BrowserRouter future={{ v7_startTransition: true }}>{children}</BrowserRouter>
           </ConfirmProvider>
           <Toaster />
         </TranslationProvider>

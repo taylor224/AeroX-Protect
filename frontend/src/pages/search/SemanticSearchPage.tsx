@@ -1,11 +1,12 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Download, Loader2, RefreshCw, Search } from 'lucide-react';
+import { ArrowLeftRight, Download, Loader2, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { useAuthContext } from '@/auth/useAuthContext';
+import { useConfirm } from '@/components/ConfirmProvider';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,7 +15,13 @@ import { useFeatureFlag } from '@/lib/featureFlags';
 import { formatDateTime } from '@/lib/format';
 import { listCameras } from '@/pages/cameras/camera.api';
 import { frameUrl } from '@/pages/playback/playback.api';
-import { getClipModelStatus, installClipModel, semanticReindex, semanticSearch } from '@/pages/search/search.api';
+import {
+  getClipModelStatus,
+  installClipModel,
+  removeClipModel,
+  semanticReindex,
+  semanticSearch,
+} from '@/pages/search/search.api';
 
 export function SemanticSearchPage() {
   const intl = useIntl();
@@ -62,6 +69,45 @@ export function SemanticSearchPage() {
     onSuccess: () => modelQuery.refetch(),
     onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
   });
+  const confirm = useConfirm();
+  const removeMut = useMutation({
+    mutationFn: removeClipModel,
+    onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
+  });
+
+  const handleRemove = async () => {
+    const ok = await confirm({
+      title: intl.formatMessage({ id: 'search.model_remove_title' }),
+      description: intl.formatMessage({ id: 'search.model_remove_desc' }),
+      destructive: true,
+    });
+    if (!ok) return;
+    const r = await removeMut.mutateAsync().catch(() => null);
+    if (!r) return;
+    if (r.restart_required) toast.warning(intl.formatMessage({ id: 'search.model_restart_required' }));
+    else toast.success(intl.formatMessage({ id: 'search.model_removed' }));
+    await modelQuery.refetch();
+    reindexMut.mutate(); // rebuild the pool in hash space so text search keeps working
+  };
+
+  const handleSwitch = async () => {
+    const cur = model?.installed_variant ?? 'cpu';
+    const next = cur === 'cpu' ? 'cuda' : 'cpu';
+    const ok = await confirm({
+      title: intl.formatMessage({ id: `search.model_switch_${next}` }),
+      description: intl.formatMessage({ id: 'search.model_switch_desc' }),
+    });
+    if (!ok) return;
+    const r = await removeMut.mutateAsync().catch(() => null);
+    if (!r) return;
+    if (r.restart_required) {
+      // locked torch DLLs (model already used since boot) — reinstall must wait
+      toast.warning(intl.formatMessage({ id: 'search.model_restart_required' }));
+      await modelQuery.refetch();
+      return;
+    }
+    installMut.mutate(next);
+  };
 
   // phase transition → done: announce + reindex so the CLIP-space vectors exist
   const prevPhase = useRef<string | null>(null);
@@ -124,41 +170,88 @@ export function SemanticSearchPage() {
         <Button type="submit">{intl.formatMessage({ id: 'search.go' })}</Button>
       </form>
 
-      {model?.backend === 'clip' ? (
-        <p className="text-xs text-emerald-500">{intl.formatMessage({ id: 'search.model_active' })}</p>
-      ) : model || backend === 'hash' ? (
+      {(model || backend === 'hash') && (
         <Card className="space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-52 flex-1 space-y-0.5">
-              <div className="text-sm font-medium text-foreground">
-                {intl.formatMessage({ id: 'search.model_title' })}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {intl.formatMessage({ id: 'search.hash_note' })}{' '}
-                {model?.supported && intl.formatMessage({ id: 'search.model_desc' })}
-              </p>
-              {model && !model.supported && (
-                <p className="text-xs text-muted-foreground">
-                  {intl.formatMessage({ id: 'search.model_unsupported' })}
-                </p>
+              {model?.backend === 'clip' ? (
+                <>
+                  <div className="text-sm font-medium text-emerald-500">
+                    {intl.formatMessage({ id: 'search.model_active' })}
+                  </div>
+                  {model.installed_variant && (
+                    <p className="text-xs text-muted-foreground">
+                      {intl.formatMessage(
+                        { id: 'search.model_current_variant' },
+                        {
+                          variant: intl.formatMessage({
+                            id: `search.model_variant_${model.installed_variant}`,
+                          }),
+                        },
+                      )}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-sm font-medium text-foreground">
+                    {intl.formatMessage({ id: 'search.model_title' })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {intl.formatMessage({ id: 'search.hash_note' })}{' '}
+                    {model?.supported && intl.formatMessage({ id: 'search.model_desc' })}
+                  </p>
+                  {model && !model.supported && (
+                    <p className="text-xs text-muted-foreground">
+                      {intl.formatMessage({ id: 'search.model_unsupported' })}
+                    </p>
+                  )}
+                </>
               )}
             </div>
-            {model?.supported && canManage && (model.phase === 'idle' || model.phase === 'error') && (
-              <div className="flex items-center gap-2">
-                <select
-                  value={variant}
-                  onChange={(e) => setVariant(e.target.value as 'cpu' | 'cuda')}
-                  className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
-                >
-                  <option value="cpu">{intl.formatMessage({ id: 'search.model_variant_cpu' })}</option>
-                  <option value="cuda">{intl.formatMessage({ id: 'search.model_variant_cuda' })}</option>
-                </select>
-                <Button size="sm" disabled={installMut.isPending} onClick={() => installMut.mutate(variant)}>
-                  <Download className="mr-1.5 h-4 w-4" />
-                  {intl.formatMessage({ id: 'search.model_install' })}
-                </Button>
-              </div>
-            )}
+            {model?.supported &&
+              canManage &&
+              (model.phase === 'idle' || model.phase === 'error' || model.phase === 'done') &&
+              (model.backend === 'clip' ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={removeMut.isPending || installMut.isPending}
+                    onClick={handleSwitch}
+                  >
+                    <ArrowLeftRight className="mr-1.5 h-4 w-4" />
+                    {intl.formatMessage({
+                      id: `search.model_switch_${(model.installed_variant ?? 'cpu') === 'cpu' ? 'cuda' : 'cpu'}`,
+                    })}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-500 hover:text-red-500"
+                    disabled={removeMut.isPending || installMut.isPending}
+                    onClick={handleRemove}
+                  >
+                    <Trash2 className="mr-1.5 h-4 w-4" />
+                    {intl.formatMessage({ id: 'search.model_remove' })}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={variant}
+                    onChange={(e) => setVariant(e.target.value as 'cpu' | 'cuda')}
+                    className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="cpu">{intl.formatMessage({ id: 'search.model_variant_cpu' })}</option>
+                    <option value="cuda">{intl.formatMessage({ id: 'search.model_variant_cuda' })}</option>
+                  </select>
+                  <Button size="sm" disabled={installMut.isPending} onClick={() => installMut.mutate(variant)}>
+                    <Download className="mr-1.5 h-4 w-4" />
+                    {intl.formatMessage({ id: 'search.model_install' })}
+                  </Button>
+                </div>
+              ))}
           </div>
           {model && (model.phase === 'installing' || model.phase === 'warming') && (
             <div className="space-y-2 rounded-lg border border-border bg-secondary/40 p-3">
@@ -177,7 +270,7 @@ export function SemanticSearchPage() {
             </pre>
           )}
         </Card>
-      ) : null}
+      )}
 
       {searchQuery.isLoading ? (
         <Card className="p-10 text-center text-sm text-muted-foreground">

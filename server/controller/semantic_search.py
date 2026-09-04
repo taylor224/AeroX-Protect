@@ -85,7 +85,13 @@ class SemanticSearchController:
     def model_status(cls, user) -> dict:
         _guard_flag()
         data = ai_model_setup.status()
-        data['backend'] = semantic_embed.active_backend()
+        # don't force-load the model on a status poll: loaded → clip; extras present →
+        # clip (it will lazy-load on first search); otherwise probe (cheap when torch
+        # is absent, and on torch-baked images the one-time load doubles as warmup)
+        if semantic_embed.is_loaded() or data['installed']:
+            data['backend'] = 'clip'
+        else:
+            data['backend'] = semantic_embed.active_backend()
         return data
 
     @classmethod
@@ -100,3 +106,12 @@ class SemanticSearchController:
             AuditLog.record('clip_install_started', target=variant,
                             user_id=user.id if user else None, detail={'variant': variant})
         return {'started': started}
+
+    @classmethod
+    def model_remove(cls, user) -> dict:
+        """Delete the CLIP install (view pre-checks supported; 409 while a job runs)."""
+        _guard_flag()
+        result = ai_model_setup.remove()
+        AuditLog.record('clip_removed', target='clip',
+                        user_id=user.id if user else None, detail=result)
+        return result

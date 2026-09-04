@@ -66,6 +66,19 @@ def reset() -> None:
         _clip = None
 
 
+def is_loaded() -> bool:
+    """CLIP model actually loaded in THIS process (⇒ torch DLLs are file-locked on
+    Windows, so removing the extras dir needs a restart)."""
+    return isinstance(_clip, dict)
+
+
+def deactivate() -> None:
+    """Drop the loaded model (frees the weights) and pin the backend to hash until the
+    next reset()/restart — used by the web-admin uninstall."""
+    global _clip
+    _clip = False
+
+
 def active_backend() -> str:
     return 'clip' if _try_clip() else 'hash'
 

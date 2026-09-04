@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 
 import { Sidebar } from '@/layouts/dashboard/Sidebar';
@@ -28,7 +28,11 @@ export function DashboardLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenuClick={() => setMobileOpen(true)} />
         <main className="flex-1 overflow-auto bg-secondary p-6 md:p-8 text-foreground">
-          <Outlet />
+          {/* inner boundary: a lazy page loading via direct URL entry suspends here,
+              keeping the sidebar/topbar shell instead of blanking the whole screen */}
+          <Suspense fallback={null}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
       <DoorbellWatcher />

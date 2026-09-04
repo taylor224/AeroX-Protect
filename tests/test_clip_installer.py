@@ -132,6 +132,67 @@ def test_run_activation_failure(monkeypatch, tmp_path, app_db):
     assert ai_model_setup.status()['phase'] == 'error'
 
 
+# ── remove / switch ───────────────────────────────────────────────────────────
+def test_remove_deletes_extras_and_cache(client, monkeypatch, tmp_path):
+    import config
+    from server.service import semantic_embed
+    extras = tmp_path / 'extras' / 'site-packages-ai'
+    cache = tmp_path / 'extras' / 'hf-cache'
+    (extras / 'open_clip').mkdir(parents=True)
+    (extras / 'torch').mkdir()
+    (extras / '.variant').write_text('cpu')
+    cache.mkdir()
+    monkeypatch.setattr(config, 'AI_EXTRAS_DIR', str(extras))
+    monkeypatch.setattr(semantic_embed, 'deactivate', lambda: None)
+
+    h = login(client)
+    r = client.delete('/api/v1/search/semantic/model', headers=h)
+    assert r.status_code == 200
+    assert r.json['data'] == {'removed': True, 'restart_required': False}
+    assert not extras.exists() and not cache.exists()
+
+    status = client.get('/api/v1/search/semantic/model', headers=h).json['data']
+    assert status['installed'] is False and status['installed_variant'] is None
+
+
+def test_remove_501_unsupported_and_409_while_running(client, monkeypatch, tmp_path):
+    import config
+    from server.service import ai_model_setup
+    h = login(client)
+    assert client.delete('/api/v1/search/semantic/model', headers=h).status_code == 501
+
+    monkeypatch.setattr(config, 'AI_EXTRAS_DIR', str(tmp_path / 'extras'))
+    ai_model_setup._state['phase'] = 'installing'
+    assert client.delete('/api/v1/search/semantic/model', headers=h).status_code == 409
+
+
+def test_remove_requires_settings_update(client, monkeypatch, tmp_path):
+    import config
+    monkeypatch.setattr(config, 'AI_EXTRAS_DIR', str(tmp_path / 'extras'))
+    h = login(client)
+    create_user(client, h, 'clip_rm', {'ai': ['semantic_search']})
+    vh = login(client, 'clip_rm', 'viewer1234!')
+    assert client.delete('/api/v1/search/semantic/model', headers=vh).status_code == 403
+
+
+def test_variant_marker_roundtrip(monkeypatch, tmp_path, app_db):
+    import config
+    from server.service import ai_model_setup, semantic_embed
+    extras = tmp_path / 'extras' / 'site-packages-ai'
+    monkeypatch.setattr(config, 'AI_EXTRAS_DIR', str(extras))
+    monkeypatch.setattr(ai_model_setup.subprocess, 'Popen', lambda *a, **k: _FakePip(0))
+    monkeypatch.setattr(semantic_embed, 'reset', lambda: None)
+    monkeypatch.setattr(semantic_embed, 'active_backend', lambda: 'clip')
+
+    ai_model_setup._state['phase'] = 'installing'
+    ai_model_setup._run('cuda')
+    assert ai_model_setup.status()['phase'] == 'done'
+    # installed_variant needs the package dirs too (fake pip made none)
+    (extras / 'open_clip').mkdir()
+    (extras / 'torch').mkdir()
+    assert ai_model_setup.installed_variant() == 'cuda'
+
+
 def test_extras_dir_defaults_from_axp_home(monkeypatch, tmp_path):
     """Native installs (old launcher included) get the installer via AXP_HOME alone."""
     import importlib
