@@ -5,6 +5,7 @@ import { useIntl } from 'react-intl';
 import { toast } from 'sonner';
 
 import { useAuthContext } from '@/auth/useAuthContext';
+import { useConfirm } from '@/components/ConfirmProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -619,6 +620,7 @@ const UPDATE_PHASE_IDS: Record<string, string> = {
 
 function SystemUpdateCard() {
   const intl = useIntl();
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { hasPermission } = useAuthContext();
   const canManage = hasPermission('settings', 'update');
@@ -816,8 +818,13 @@ function SystemUpdateCard() {
             <Button
               size="sm"
               disabled={busy}
-              onClick={() => {
-                if (window.confirm(intl.formatMessage({ id: 'settings.update_confirm' }))) {
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: intl.formatMessage({ id: 'settings.update_btn' }, { version: d.latest_version ?? '' }),
+                    description: intl.formatMessage({ id: 'settings.update_confirm' }),
+                  })
+                ) {
                   applyMut.mutate();
                 }
               }}
