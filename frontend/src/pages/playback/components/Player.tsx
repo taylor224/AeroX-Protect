@@ -32,6 +32,8 @@ export function Player({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<HlsType | null>(null);
   const lastEmitted = useRef<number | null>(null); // playhead we pushed up (ignore the echo)
+  const seekTsRef = useRef<number | null>(null); // latest requested seek (read at manifest-ready)
+  seekTsRef.current = seekTs;
   const [error, setError] = useState(false);
 
   // does this browser need a server-side H.264 transcode? (recording is HEVC + no HEVC in MSE)
@@ -55,13 +57,41 @@ export function Player({
     });
   }, [segments]);
 
+  // hls.js's own fragment table, once loaded, is the authoritative map: frag.start is the
+  // real PTS-aligned media offset and programDateTime comes from #EXT-X-PROGRAM-DATE-TIME.
+  // The DB-row cumsum (EXTINF estimates) drifts from the actual media timeline when indexed
+  // durations are off, which made event-click seeks land at the wrong spot — so prefer the
+  // fragment table and keep rows only as a pre-load / native-HLS (Safari) fallback.
+  const liveFrags = () => {
+    const frags = hlsRef.current?.levels?.[0]?.details?.fragments;
+    return frags?.length && frags[0].programDateTime != null ? frags : null;
+  };
+
   const wallToMedia = (ts: number): number => {
+    const frags = liveFrags();
+    if (frags) {
+      for (const f of frags) {
+        if (f.programDateTime == null) continue;
+        if (ts < f.programDateTime + f.duration * 1000)
+          return f.start + Math.max(0, (ts - f.programDateTime) / 1000); // in-frag, or snap fwd across a gap
+      }
+      const last = frags[frags.length - 1];
+      return last.start + last.duration;
+    }
     for (const r of rows) {
       if (ts < r.end) return r.mediaStart + Math.max(0, (ts - r.start) / 1000); // in-seg, or snap fwd across a gap
     }
     return rows.length ? rows[rows.length - 1].mediaStart + rows[rows.length - 1].dur : 0;
   };
   const mediaToWall = (mt: number): number => {
+    const frags = liveFrags();
+    if (frags) {
+      for (const f of frags) {
+        if (f.programDateTime == null) continue;
+        if (mt < f.start + f.duration) return f.programDateTime + Math.max(0, mt - f.start) * 1000;
+      }
+      return to;
+    }
     for (const r of rows) {
       if (mt < r.mediaStart + r.dur) return r.start + Math.max(0, mt - r.mediaStart) * 1000;
     }
@@ -76,9 +106,12 @@ export function Player({
     setError(false);
     let cancelled = false;
     const src = hlsUrl(cameraUuid, from, to, needsTranscode);
-    const startMedia = seekTs != null ? wallToMedia(seekTs) : 0;
 
     const seekAndPlay = () => {
+      // read the seek target NOW (not at effect time): a click that landed while the
+      // stream was still loading must not be dropped
+      const ts = seekTsRef.current;
+      const startMedia = ts != null ? wallToMedia(ts) : 0;
       try {
         if (startMedia > 0) video.currentTime = startMedia;
       } catch {

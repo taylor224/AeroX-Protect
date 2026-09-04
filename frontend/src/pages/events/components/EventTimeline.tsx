@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useTranslation } from '@/i18n/TranslationProvider';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatTime24 } from '@/lib/format';
 import { eventColor } from '@/pages/events/eventMeta';
 import type { EventMarker } from '@/types/p3';
 import type { Bookmark } from '@/types/p6';
@@ -37,6 +37,7 @@ export function EventTimeline({
   const { locale } = useTranslation();
   const trackRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ from, to });
+  const [hover, setHover] = useState<{ x: number; ts: number } | null>(null);
   const drag = useRef<{ x: number; from: number; to: number; moved: boolean } | null>(null);
 
   // reset the viewport whenever the data window (selected range) changes
@@ -98,7 +99,13 @@ export function EventTimeline({
       if (d && !d.moved && track) {
         const rect = track.getBoundingClientRect();
         const ratio = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-        onSeek(Math.round(vFrom + ratio * span));
+        const ts = Math.round(vFrom + ratio * span);
+        // empty-track click snaps to the nearest event to the RIGHT of the click; past the
+        // last event it's a plain seek
+        let next: EventMarker | null = null;
+        for (const m of markers) if (m.ts >= ts && (!next || m.ts < next.ts)) next = m;
+        if (next) onPickEvent(next.event_id, next.ts);
+        else onSeek(ts);
       }
     };
     window.addEventListener('mousemove', move);
@@ -124,6 +131,14 @@ export function EventTimeline({
       <div
         ref={trackRef}
         onMouseDown={onDown}
+        onMouseMove={(e) => {
+          const track = trackRef.current;
+          if (!track) return;
+          const rect = track.getBoundingClientRect();
+          const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+          setHover({ x: e.clientX - rect.left, ts: vFrom + ratio * span });
+        }}
+        onMouseLeave={() => setHover(null)}
         className="relative h-16 w-full cursor-ew-resize select-none overflow-hidden rounded bg-white/5"
       >
         {coverage.map((r, i) => {
@@ -175,10 +190,21 @@ export function EventTimeline({
         {playhead >= vFrom && playhead <= vTo && (
           <div className="pointer-events-none absolute top-0 z-20 h-full w-0.5 bg-white" style={{ left: `${pct(playhead)}%` }} />
         )}
+        {hover && (
+          <>
+            <div className="pointer-events-none absolute top-0 z-30 h-full w-px bg-white/40" style={{ left: hover.x }} />
+            <div
+              className="pointer-events-none absolute top-1 z-30 -translate-x-1/2 rounded bg-black/80 px-1.5 py-0.5 text-[10px] tabular-nums text-white"
+              style={{ left: hover.x }}
+            >
+              {formatTime24(hover.ts, span < 600_000)}
+            </div>
+          </>
+        )}
       </div>
-      <div className="flex justify-between text-[10px] text-white/40">
+      <div className="flex justify-between text-[10px] tabular-nums text-white/40">
         {ticks.map((t, i) => (
-          <span key={i}>{formatDateTime(t, locale).split(' ').slice(-1)[0]}</span>
+          <span key={i}>{formatTime24(t)}</span>
         ))}
       </div>
     </div>

@@ -152,9 +152,9 @@ export function EventsPage() {
     else setPlayhead(ts);
   };
 
-  // Clicking the timeline track scrubs to the exact clicked time on the continuous recording.
-  // (Jumping to a specific event is done by clicking the event marker/list, which calls
-  // pickById/selectEvent — the track itself must not hijack a plain seek.)
+  // Plain seek on the continuous recording. The timeline itself snaps empty-track clicks to
+  // the nearest event on the right (onPickEvent); onSeek only fires past the last event or
+  // from bookmark ticks.
   const seekTo = (ts: number) => setPlayhead(ts);
 
   const toggleType = (t: string) =>
