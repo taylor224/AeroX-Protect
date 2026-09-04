@@ -112,6 +112,12 @@ LAUNCHER_URL = os.getenv('AXP_LAUNCHER_URL')
 LAUNCHER_TOKEN = os.getenv('AXP_LAUNCHER_TOKEN')
 UPDATE_TICKET_TTL_S = int(os.getenv('AXP_UPDATE_TICKET_TTL_S', '1800'))
 
+# Persistent site-packages dir for optional AI deps (CLIP semantic search). Lives
+# OUTSIDE the versioned app tree so auto-updates don't wipe it; the launcher puts it
+# on every app process's PYTHONPATH and points this env var at it. Unset → the
+# web-admin CLIP installer is unavailable (Docker: bake torch into the image instead).
+AI_EXTRAS_DIR = os.getenv('AXP_AI_EXTRAS_DIR')
+
 # ── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '*')
 

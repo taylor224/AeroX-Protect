@@ -30,3 +30,22 @@ export async function semanticReindex(cameraId?: string): Promise<{ indexed: num
   );
   return data.data as { indexed: number; backend: string };
 }
+
+export interface ClipModelStatus {
+  supported: boolean;
+  installed: boolean;
+  phase: 'idle' | 'installing' | 'warming' | 'done' | 'error';
+  variant: string | null;
+  error: string | null;
+  log: string[];
+  backend: string;
+}
+
+export async function getClipModelStatus(): Promise<ClipModelStatus> {
+  const { data } = await api.get<ApiResponse<ClipModelStatus>>('/search/semantic/model');
+  return data.data as ClipModelStatus;
+}
+
+export async function installClipModel(variant: 'cpu' | 'cuda'): Promise<void> {
+  await api.post('/search/semantic/model/install', { variant });
+}

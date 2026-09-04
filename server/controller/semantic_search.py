@@ -3,10 +3,11 @@ plus an admin/owner reindex trigger. Flag-gated by `semantic_search`.
 """
 from datetime import datetime
 
-from server.exception import NoPermissionException
+from server.exception import InvalidParameterException, NoPermissionException
 from server.model import UTC
+from server.model.audit_log import AuditLog
 from server.model.camera import Camera
-from server.service import feature_flag, semantic_embed, semantic_search
+from server.service import ai_model_setup, feature_flag, semantic_embed, semantic_search
 from server.service.permission import PermissionService
 from server.util.tool import safe_int
 
@@ -79,3 +80,23 @@ class SemanticSearchController:
             cam_ids = list(allowed)
         return semantic_search.index_events(
             camera_ids=cam_ids, start=_parse_ms(data.get('start')), end=_parse_ms(data.get('end')))
+
+    @classmethod
+    def model_status(cls, user) -> dict:
+        _guard_flag()
+        data = ai_model_setup.status()
+        data['backend'] = semantic_embed.active_backend()
+        return data
+
+    @classmethod
+    def model_install(cls, user, data: dict) -> dict:
+        """Start the CLIP dep install (view pre-checks supported/409)."""
+        _guard_flag()
+        variant = data.get('variant') or 'cpu'
+        if variant not in ai_model_setup.VARIANTS:
+            raise InvalidParameterException('variant must be one of %s' % (ai_model_setup.VARIANTS,))
+        started = ai_model_setup.start(variant)
+        if started:
+            AuditLog.record('clip_install_started', target=variant,
+                            user_id=user.id if user else None, detail={'variant': variant})
+        return {'started': started}

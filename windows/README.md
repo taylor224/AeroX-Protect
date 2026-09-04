@@ -26,6 +26,8 @@ C:\AeroXProtect\
   current     → versions\vX 디렉터리 정션. 업데이트 = 정션 스왑, 롤백 = 재포인트
   config\     axp.env(시크릿, SYSTEM/Admins ACL), Caddyfile, my.ini, redis.conf, go2rtc.yaml
   data\       mariadb, redis, logs, staging, backups, media\thumbnails
+  extras\     site-packages-ai(웹 어드민 CLIP 설치 대상, 전 앱 프로세스 PYTHONPATH 선두), hf-cache(HF_HOME)
+              ← versions\ 밖이라 업데이트에도 유지
   storage\    disk1\  (AXP_DISK_ROOT — 설치 시 변경 가능)
 ```
 
@@ -65,4 +67,6 @@ C:\AeroXProtect\
 - manifest minisign 서명 검증(`update.py` 검증 지점에 드롭인)
 - Authenticode 코드서명 (없으면 SmartScreen 경고)
 - Defender 실시간 검사에서 `storage\` 제외 안내(녹화 쓰기 처리량)
-- AI detector 선택 컴포넌트(`site-packages-ai` + requirements-inference wheels)
+- AI detector 선택 컴포넌트(requirements-inference wheels — CLIP 시맨틱 검색은 웹 어드민
+  설치(검색 페이지 → CLIP 모델 설치 → `extras\site-packages-ai`)로 해결됨; detector는
+  legacy `versions\v*\site-packages-ai` 또는 `extras\site-packages-ai\ultralytics` 존재 시 기동)

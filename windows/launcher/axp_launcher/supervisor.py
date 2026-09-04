@@ -173,14 +173,18 @@ def build_specs(cfg: dict[str, str]) -> list[ServiceSpec]:
                          'SERVER_API_URL': 'http://127.0.0.1:%d/api/v1' % env.BACKEND_PORT,
                          'DETECTOR_BIND': '127.0.0.1:%d' % env.DETECTOR_PORT,
                          'GPU_ENABLED': cfg.get('GPU_ENABLED', 'false'),
-                         'PYTHONPATH': '%s;%s;%s' % (env.CURRENT / 'site-packages-ai',
-                                                     env.CURRENT / 'site-packages',
-                                                     env.CURRENT / 'app')}),
+                         'PYTHONPATH': '%s;%s;%s;%s' % (env.EXTRAS_AI,
+                                                        env.CURRENT / 'site-packages-ai',
+                                                        env.CURRENT / 'site-packages',
+                                                        env.CURRENT / 'app')}),
             cwd=lambda: str(env.CURRENT / 'app'),
             ready=lambda c: health.http_ok('http://127.0.0.1:%d/healthz' % env.DETECTOR_PORT),
             app_tier=True,
             optional=True,
-            exists=lambda: (env.CURRENT / 'site-packages-ai').exists(),
+            # inference deps present (legacy in-version dir, or ultralytics in the
+            # persistent extras dir — CLIP-only installs must NOT start the detector)
+            exists=lambda: ((env.CURRENT / 'site-packages-ai').exists()
+                            or (env.EXTRAS_AI / 'ultralytics').exists()),
         ),
     ]
 

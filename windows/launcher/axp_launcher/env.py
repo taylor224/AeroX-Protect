@@ -13,6 +13,11 @@ LOGS = DATA / 'logs'
 STAGING = DATA / 'staging'
 BACKUPS = DATA / 'backups'
 STORAGE = AXP_HOME / 'storage'
+# Optional AI deps (CLIP semantic search, web-admin installed) + their model-weight
+# cache. Outside versions\ so update junction swaps keep them.
+EXTRAS = AXP_HOME / 'extras'
+EXTRAS_AI = EXTRAS / 'site-packages-ai'
+HF_CACHE = EXTRAS / 'hf-cache'
 
 ENV_FILE = CONFIG / 'axp.env'
 INSTALLED_FILE = CONFIG / 'installed.json'
@@ -88,7 +93,11 @@ def app_env(cfg: dict[str, str], version_root: Path | None = None,
         'TZ': 'UTC',
         'PYTHONUNBUFFERED': '1',
         'PYTHONDONTWRITEBYTECODE': '1',
-        'PYTHONPATH': '%s;%s' % (root / 'site-packages', root / 'app'),
+        # extras first: a missing dir on sys.path is harmless, and once the web-admin
+        # CLIP install populates it every app process sees torch/open_clip
+        'PYTHONPATH': '%s;%s;%s' % (EXTRAS_AI, root / 'site-packages', root / 'app'),
+        'AXP_AI_EXTRAS_DIR': str(EXTRAS_AI),
+        'HF_HOME': str(HF_CACHE),
         'AXP_HOME': str(AXP_HOME),
         'AXP_VERSION': (root / 'VERSION').read_text(encoding='utf-8').strip()
                         if (root / 'VERSION').exists() else current_version(),

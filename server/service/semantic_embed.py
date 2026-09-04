@@ -58,6 +58,14 @@ def _try_clip():
     return _clip
 
 
+def reset() -> None:
+    """Forget a failed CLIP probe so the next call re-imports — used by the web-admin
+    installer to hot-activate CLIP right after the deps land, without a restart."""
+    global _clip
+    if _clip is False:
+        _clip = None
+
+
 def active_backend() -> str:
     return 'clip' if _try_clip() else 'hash'
 

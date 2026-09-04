@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { RefreshCw, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Download, Loader2, RefreshCw, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -14,7 +14,7 @@ import { useFeatureFlag } from '@/lib/featureFlags';
 import { formatDateTime } from '@/lib/format';
 import { listCameras } from '@/pages/cameras/camera.api';
 import { frameUrl } from '@/pages/playback/playback.api';
-import { semanticReindex, semanticSearch } from '@/pages/search/search.api';
+import { getClipModelStatus, installClipModel, semanticReindex, semanticSearch } from '@/pages/search/search.api';
 
 export function SemanticSearchPage() {
   const intl = useIntl();
@@ -43,6 +43,42 @@ export function SemanticSearchPage() {
     onSuccess: (r) => toast.success(intl.formatMessage({ id: 'search.reindexed' }, { count: r.indexed })),
     onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
   });
+
+  const canSearch = hasPermission('ai', 'semantic_search');
+  const canManage = hasPermission('settings', 'update');
+  const [variant, setVariant] = useState<'cpu' | 'cuda'>('cpu');
+  const modelQuery = useQuery({
+    queryKey: ['clip-model'],
+    queryFn: getClipModelStatus,
+    enabled: enabled && canSearch,
+    refetchInterval: (q) => {
+      const p = q.state.data?.phase;
+      return p === 'installing' || p === 'warming' ? 2000 : false;
+    },
+  });
+  const model = modelQuery.data;
+  const installMut = useMutation({
+    mutationFn: (v: 'cpu' | 'cuda') => installClipModel(v),
+    onSuccess: () => modelQuery.refetch(),
+    onError: () => toast.error(intl.formatMessage({ id: 'common.error' })),
+  });
+
+  // phase transition → done: announce + reindex so the CLIP-space vectors exist
+  const prevPhase = useRef<string | null>(null);
+  useEffect(() => {
+    const p = model?.phase;
+    if (!p) return;
+    if (prevPhase.current && prevPhase.current !== p) {
+      if (p === 'done') {
+        toast.success(intl.formatMessage({ id: 'search.model_done' }));
+        reindexMut.mutate();
+      } else if (p === 'error') {
+        toast.error(intl.formatMessage({ id: 'search.model_error' }));
+      }
+    }
+    prevPhase.current = p;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model?.phase]);
 
   if (!enabled) {
     return (
@@ -88,9 +124,62 @@ export function SemanticSearchPage() {
         <Button type="submit">{intl.formatMessage({ id: 'search.go' })}</Button>
       </form>
 
-      {backend === 'hash' && (
-        <p className="text-xs text-muted-foreground">{intl.formatMessage({ id: 'search.hash_note' })}</p>
-      )}
+      {model?.backend === 'clip' ? (
+        <p className="text-xs text-emerald-500">{intl.formatMessage({ id: 'search.model_active' })}</p>
+      ) : model || backend === 'hash' ? (
+        <Card className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="min-w-52 flex-1 space-y-0.5">
+              <div className="text-sm font-medium text-foreground">
+                {intl.formatMessage({ id: 'search.model_title' })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {intl.formatMessage({ id: 'search.hash_note' })}{' '}
+                {model?.supported && intl.formatMessage({ id: 'search.model_desc' })}
+              </p>
+              {model && !model.supported && (
+                <p className="text-xs text-muted-foreground">
+                  {intl.formatMessage({ id: 'search.model_unsupported' })}
+                </p>
+              )}
+            </div>
+            {model?.supported && canManage && (model.phase === 'idle' || model.phase === 'error') && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={variant}
+                  onChange={(e) => setVariant(e.target.value as 'cpu' | 'cuda')}
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                >
+                  <option value="cpu">{intl.formatMessage({ id: 'search.model_variant_cpu' })}</option>
+                  <option value="cuda">{intl.formatMessage({ id: 'search.model_variant_cuda' })}</option>
+                </select>
+                <Button size="sm" disabled={installMut.isPending} onClick={() => installMut.mutate(variant)}>
+                  <Download className="mr-1.5 h-4 w-4" />
+                  {intl.formatMessage({ id: 'search.model_install' })}
+                </Button>
+              </div>
+            )}
+          </div>
+          {model && (model.phase === 'installing' || model.phase === 'warming') && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {intl.formatMessage({ id: `search.model_phase_${model.phase}` })}
+              </div>
+              {model.log.length > 0 && (
+                <pre className="max-h-28 overflow-auto rounded bg-black/30 p-2 text-[10px] leading-4 text-muted-foreground">
+                  {model.log.slice(-10).join('\n')}
+                </pre>
+              )}
+            </div>
+          )}
+          {model?.phase === 'error' && (
+            <pre className="max-h-28 overflow-auto rounded bg-red-500/10 p-2 text-[10px] leading-4 text-red-400">
+              {[model.error ?? '', ...model.log.slice(-6)].join('\n')}
+            </pre>
+          )}
+        </Card>
+      ) : null}
 
       {searchQuery.isLoading ? (
         <Card className="p-10 text-center text-sm text-muted-foreground">
