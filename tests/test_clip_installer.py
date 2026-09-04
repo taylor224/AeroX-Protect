@@ -132,6 +132,33 @@ def test_run_activation_failure(monkeypatch, tmp_path, app_db):
     assert ai_model_setup.status()['phase'] == 'error'
 
 
+def test_extras_dir_defaults_from_axp_home(monkeypatch, tmp_path):
+    """Native installs (old launcher included) get the installer via AXP_HOME alone."""
+    import importlib
+
+    import config as cfg
+    monkeypatch.setenv('AXP_HOME', str(tmp_path))
+    monkeypatch.delenv('AXP_AI_EXTRAS_DIR', raising=False)
+    monkeypatch.delenv('HF_HOME', raising=False)
+    try:
+        importlib.reload(cfg)
+        assert cfg.AI_EXTRAS_DIR == str(tmp_path / 'extras' / 'site-packages-ai')
+        assert cfg.os.environ['HF_HOME'] == str(tmp_path / 'extras' / 'hf-cache')
+
+        monkeypatch.setenv('AXP_AI_EXTRAS_DIR', str(tmp_path / 'elsewhere'))
+        importlib.reload(cfg)
+        assert cfg.AI_EXTRAS_DIR == str(tmp_path / 'elsewhere')  # explicit env wins
+
+        monkeypatch.delenv('AXP_AI_EXTRAS_DIR')
+        monkeypatch.delenv('AXP_HOME')
+        importlib.reload(cfg)
+        assert cfg.AI_EXTRAS_DIR is None  # Docker: unsupported
+    finally:
+        monkeypatch.delenv('AXP_HOME', raising=False)
+        monkeypatch.delenv('AXP_AI_EXTRAS_DIR', raising=False)
+        importlib.reload(cfg)
+
+
 def test_installed_detection(monkeypatch, tmp_path):
     import config
     from server.service import ai_model_setup

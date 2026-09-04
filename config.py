@@ -113,10 +113,22 @@ LAUNCHER_TOKEN = os.getenv('AXP_LAUNCHER_TOKEN')
 UPDATE_TICKET_TTL_S = int(os.getenv('AXP_UPDATE_TICKET_TTL_S', '1800'))
 
 # Persistent site-packages dir for optional AI deps (CLIP semantic search). Lives
-# OUTSIDE the versioned app tree so auto-updates don't wipe it; the launcher puts it
-# on every app process's PYTHONPATH and points this env var at it. Unset → the
-# web-admin CLIP installer is unavailable (Docker: bake torch into the image instead).
-AI_EXTRAS_DIR = os.getenv('AXP_AI_EXTRAS_DIR')
+# OUTSIDE the versioned app tree so auto-updates don't wipe it. Explicit env wins;
+# on a native install (AXP_HOME set — every launcher version sets it) it defaults to
+# AXP_HOME\extras\site-packages-ai, so app-only auto-updates get the feature without
+# a launcher/installer refresh. Unset (Docker) → the web-admin CLIP installer is
+# unavailable there; bake torch into the image instead.
+AI_EXTRAS_DIR = os.getenv('AXP_AI_EXTRAS_DIR') or (
+    os.path.join(os.environ['AXP_HOME'], 'extras', 'site-packages-ai')
+    if os.getenv('AXP_HOME') else None)
+if AI_EXTRAS_DIR:
+    # self-serve what a newer launcher would inject: importable deps + a
+    # weight-cache location that both survive version-junction swaps
+    os.environ.setdefault('HF_HOME', os.path.join(os.path.dirname(AI_EXTRAS_DIR), 'hf-cache'))
+    if os.path.isdir(AI_EXTRAS_DIR):
+        import sys
+        if AI_EXTRAS_DIR not in sys.path:
+            sys.path.insert(0, AI_EXTRAS_DIR)
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '*')
