@@ -161,16 +161,14 @@ export function SemanticSearchPage() {
             )}
           </div>
           {model && (model.phase === 'installing' || model.phase === 'warming') && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <div className="space-y-2 rounded-lg border border-border bg-secondary/40 p-3">
+              <div className="flex items-center gap-2.5 text-sm font-medium text-foreground">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
                 {intl.formatMessage({ id: `search.model_phase_${model.phase}` })}
               </div>
-              {model.log.length > 0 && (
-                <pre className="max-h-28 overflow-auto rounded bg-black/30 p-2 text-[10px] leading-4 text-muted-foreground">
-                  {model.log.slice(-10).join('\n')}
-                </pre>
-              )}
+              <div className="h-1 w-full overflow-hidden rounded-full bg-border">
+                <div className="h-full w-1/3 animate-[indeterminate_1.4s_ease-in-out_infinite] rounded-full bg-primary" />
+              </div>
             </div>
           )}
           {model?.phase === 'error' && (

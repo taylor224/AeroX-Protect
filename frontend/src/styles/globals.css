@@ -96,3 +96,9 @@ body {
 .react-grid-item > .react-resizable-handle-s::after {
   display: none;
 }
+
+/* indeterminate progress bar (CLIP model install) */
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
